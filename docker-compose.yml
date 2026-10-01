@@ -1,0 +1,71 @@
+version: '3.8'
+
+services:
+  replicore-primary:
+    image: postgres:16-alpine
+    container_name: replicore-primary
+    environment:
+      POSTGRES_DB: replicore_db
+      POSTGRES_USER: replicore_user
+      POSTGRES_PASSWORD: replicore_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - primary_data:/var/lib/postgresql/data
+      - ./docker/init-primary.sql:/docker-entrypoint-initdb.d/01-init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U replicore_user -d replicore_db"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+    networks:
+      - replicore-net
+
+  replicore-replica-1:
+    image: postgres:16-alpine
+    container_name: replicore-replica-1
+    environment:
+      POSTGRES_DB: replicore_db
+      POSTGRES_USER: replicore_user
+      POSTGRES_PASSWORD: replicore_pass
+    ports:
+      - "5433:5432"
+    volumes:
+      - replica1_data:/var/lib/postgresql/data
+      - ./docker/init-replica.sql:/docker-entrypoint-initdb.d/01-init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U replicore_user -d replicore_db"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+    networks:
+      - replicore-net
+
+  replicore-replica-2:
+    image: postgres:16-alpine
+    container_name: replicore-replica-2
+    environment:
+      POSTGRES_DB: replicore_db
+      POSTGRES_USER: replicore_user
+      POSTGRES_PASSWORD: replicore_pass
+    ports:
+      - "5434:5432"
+    volumes:
+      - replica2_data:/var/lib/postgresql/data
+      - ./docker/init-replica.sql:/docker-entrypoint-initdb.d/01-init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U replicore_user -d replicore_db"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+    networks:
+      - replicore-net
+
+networks:
+  replicore-net:
+    driver: bridge
+
+volumes:
+  primary_data:
+  replica1_data:
+  replica2_data:

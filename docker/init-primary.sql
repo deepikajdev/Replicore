@@ -1,0 +1,28 @@
+-- Initial schema for Primary Node
+CREATE TABLE IF NOT EXISTS records (
+    id SERIAL PRIMARY KEY,
+    key VARCHAR(255) UNIQUE NOT NULL,
+    value TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS cluster_wal_log (
+    lsn BIGSERIAL PRIMARY KEY,
+    op_type VARCHAR(32) NOT NULL,
+    record_key VARCHAR(255) NOT NULL,
+    payload JSONB NOT NULL,
+    timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS node_metadata (
+    node_id VARCHAR(64) PRIMARY KEY,
+    role VARCHAR(32) NOT NULL,
+    last_applied_lsn BIGINT DEFAULT 0,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+INSERT INTO node_metadata (node_id, role, last_applied_lsn)
+VALUES ('primary', 'PRIMARY', 0)
+ON CONFLICT (node_id) DO NOTHING;
