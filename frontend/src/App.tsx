@@ -1,12 +1,23 @@
-import React, { useState } from 'react'
+import React, { useState, Suspense, lazy } from 'react'
 import { AppShell } from './layouts/AppShell'
 import { ClusterProvider } from './context/ClusterContext'
 import { OverviewPage } from './pages/OverviewPage'
-import { ClusterNodesPage } from './pages/ClusterNodesPage'
-import { ReplicationPage } from './pages/ReplicationPage'
-import { EventLogsPage } from './pages/EventLogsPage'
-import { SimulationPage } from './pages/SimulationPage'
+import { PageSkeleton } from './components/PageSkeleton'
 import type { PageId } from './types'
+
+// Lazy-load secondary pages to optimize initial bundle and startup speed
+const ClusterNodesPage = lazy(() =>
+  import('./pages/ClusterNodesPage').then((m) => ({ default: m.ClusterNodesPage }))
+)
+const ReplicationPage = lazy(() =>
+  import('./pages/ReplicationPage').then((m) => ({ default: m.ReplicationPage }))
+)
+const EventLogsPage = lazy(() =>
+  import('./pages/EventLogsPage').then((m) => ({ default: m.EventLogsPage }))
+)
+const SimulationPage = lazy(() =>
+  import('./pages/SimulationPage').then((m) => ({ default: m.SimulationPage }))
+)
 
 export const App: React.FC = () => {
   const [currentPage, setCurrentPage] = useState<PageId>('overview')
@@ -16,13 +27,29 @@ export const App: React.FC = () => {
       case 'overview':
         return <OverviewPage onNavigate={setCurrentPage} />
       case 'nodes':
-        return <ClusterNodesPage />
+        return (
+          <Suspense fallback={<PageSkeleton />}>
+            <ClusterNodesPage />
+          </Suspense>
+        )
       case 'replication':
-        return <ReplicationPage />
+        return (
+          <Suspense fallback={<PageSkeleton />}>
+            <ReplicationPage />
+          </Suspense>
+        )
       case 'events':
-        return <EventLogsPage />
+        return (
+          <Suspense fallback={<PageSkeleton />}>
+            <EventLogsPage />
+          </Suspense>
+        )
       case 'simulation':
-        return <SimulationPage />
+        return (
+          <Suspense fallback={<PageSkeleton />}>
+            <SimulationPage />
+          </Suspense>
+        )
       default:
         return <OverviewPage onNavigate={setCurrentPage} />
     }
@@ -38,4 +65,3 @@ export const App: React.FC = () => {
 }
 
 export default App
-

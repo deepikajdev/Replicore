@@ -44,7 +44,7 @@ export const ReplicationPage: React.FC = () => {
           title="Replication Protocol"
           value={replicationMode}
           icon={<Layers className="w-4 h-4 text-purple-400" />}
-          description="Non-blocking WAL stream"
+          description="Non-blocking WAL stream transmission"
           trend="Real-time"
           trendColor="success"
         />
@@ -52,8 +52,8 @@ export const ReplicationPage: React.FC = () => {
           title="Primary Commit Head"
           value={`LSN ${primaryLsn}`}
           icon={<GitCommit className="w-4 h-4 text-blue-400" />}
-          description={`Leader: ${primaryNodeId}`}
-          trend="Monotonic"
+          description={`Active Leader: ${primaryNodeId}`}
+          trend="Monotonic WAL"
           trendColor="neutral"
         />
         <StatCard
@@ -63,14 +63,14 @@ export const ReplicationPage: React.FC = () => {
           description={
             maxLagReplica
               ? `Delayed by ${maxLagReplica.configured_delay_ms}ms on ${maxLagReplica.node_id}`
-              : 'All replicas in sync'
+              : 'All follower replicas caught up'
           }
           trend={maxLagReplica ? maxLagReplica.node_id : 'In Sync'}
           trendColor={maxLag > 0 ? 'warning' : 'success'}
         />
       </div>
 
-      {/* Real-time Telemetry Charts (Stage 4D) */}
+      {/* Real-time Telemetry Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <ReplicationLagChart
           history={metricsHistory}
@@ -87,8 +87,14 @@ export const ReplicationPage: React.FC = () => {
       {/* Replica Current Lag & Queue Comparison Chart */}
       <ReplicaLagBarChart replicas={replicas} isLoading={isLoading} />
 
-      <div className="rounded-lg border border-[#30363d] bg-[#161b22] p-5">
-        <h3 className="text-sm font-semibold text-[#e6edf3] mb-4">Replica Lag & Queue Metrics</h3>
+      {/* Replicas Detail Table */}
+      <div className="rounded-lg border border-[#30363d] bg-[#161b22] p-4 sm:p-5">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-sm font-semibold text-[#e6edf3]">Replica Stream Telemetry & Queue</h2>
+            <p className="text-xs text-[#7d8590] mt-0.5">Applied Log Sequence Number vs Primary WAL Head per follower</p>
+          </div>
+        </div>
 
         {replicas.length === 0 ? (
           <div className="py-12 text-center text-[#7d8590]">
@@ -101,21 +107,21 @@ export const ReplicationPage: React.FC = () => {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
+            <table className="w-full text-left text-xs" aria-label="Replica lag and queue metrics">
               <thead>
-                <tr className="border-b border-[#30363d] text-[#7d8590] uppercase tracking-wider">
-                  <th className="py-2.5 px-3 font-medium">Replica</th>
-                  <th className="py-2.5 px-3 font-medium">Status</th>
-                  <th className="py-2.5 px-3 font-medium">Primary LSN</th>
-                  <th className="py-2.5 px-3 font-medium">Applied LSN</th>
-                  <th className="py-2.5 px-3 font-medium">Lag (LSN)</th>
-                  <th className="py-2.5 px-3 font-medium">Configured Delay</th>
-                  <th className="py-2.5 px-3 font-medium">Pending Queue</th>
+                <tr className="border-b border-[#30363d] text-[#7d8590] uppercase tracking-wider bg-[#0d1117]/40">
+                  <th scope="col" className="py-2.5 px-3 font-medium">Replica</th>
+                  <th scope="col" className="py-2.5 px-3 font-medium">Status</th>
+                  <th scope="col" className="py-2.5 px-3 font-medium">Primary LSN</th>
+                  <th scope="col" className="py-2.5 px-3 font-medium">Applied LSN</th>
+                  <th scope="col" className="py-2.5 px-3 font-medium">Lag (LSN)</th>
+                  <th scope="col" className="py-2.5 px-3 font-medium">Configured Delay</th>
+                  <th scope="col" className="py-2.5 px-3 font-medium">Pending Queue</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#21262d]">
                 {replicas.map((replica) => (
-                  <tr key={replica.node_id} className="hover:bg-[#1c2128]/50">
+                  <tr key={replica.node_id} className="hover:bg-[#1c2128]/50 transition-colors">
                     <td className="py-3 px-3 font-medium text-[#e6edf3]">
                       <div className="flex items-center gap-2">
                         <span className="font-mono font-semibold">{replica.node_id}</span>

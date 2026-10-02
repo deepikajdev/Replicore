@@ -31,7 +31,6 @@ interface OverviewPageProps {
   onNavigate?: (page: PageId) => void
 }
 
-
 export const OverviewPage: React.FC<OverviewPageProps> = ({ onNavigate }) => {
   const { cluster, replication, events, isBackendConnected, isLoading } = useCluster()
 
@@ -68,25 +67,34 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({ onNavigate }) => {
 
   return (
     <div className="space-y-6">
-      {/* Page Header */}
+      {/* 1. Page Header */}
       <SectionHeader
         title="Cluster Overview"
         description="High-availability replication state, node topology, and WAL log sequence numbers."
         action={
           <div className="flex items-center gap-2">
             {!isBackendConnected ? (
-              <span className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-rose-950/60 border border-rose-800/60 text-rose-300 text-xs font-medium">
-                <WifiOff className="w-3.5 h-3.5 text-rose-400" />
+              <span
+                role="status"
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-rose-950/60 border border-rose-800/60 text-rose-300 text-xs font-medium"
+              >
+                <WifiOff className="w-3.5 h-3.5 text-rose-400" aria-hidden="true" />
                 Backend Offline
               </span>
             ) : isHealthy ? (
-              <span className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-emerald-950/50 border border-emerald-800/60 text-emerald-300 text-xs font-medium">
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+              <span
+                role="status"
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-emerald-950/50 border border-emerald-800/60 text-emerald-300 text-xs font-medium"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" aria-hidden="true" />
                 All Systems Operational
               </span>
             ) : (
-              <span className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-amber-950/50 border border-amber-800/60 text-amber-300 text-xs font-medium">
-                <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+              <span
+                role="status"
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-amber-950/50 border border-amber-800/60 text-amber-300 text-xs font-medium"
+              >
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-400" aria-hidden="true" />
                 Cluster Degraded
               </span>
             )}
@@ -94,13 +102,13 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({ onNavigate }) => {
         }
       />
 
-      {/* KPI Stats Grid */}
+      {/* 2. Primary KPI Stats Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           title="Cluster Health"
           value={
             !isBackendConnected
-              ? 'DISCONNECTED'
+              ? 'OFFLINE'
               : isHealthy
               ? 'HEALTHY'
               : 'DEGRADED'
@@ -123,6 +131,7 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({ onNavigate }) => {
           trendColor={
             !isBackendConnected ? 'danger' : isHealthy ? 'success' : 'warning'
           }
+          isLoading={isLoading && !cluster}
         />
 
         <StatCard
@@ -131,7 +140,7 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({ onNavigate }) => {
             cluster?.primary_node_id
               ? cluster.primary_node_id
               : isBackendConnected
-              ? 'None (Electing)'
+              ? 'None'
               : '—'
           }
           icon={<Server className="w-4 h-4 text-blue-400" />}
@@ -142,6 +151,7 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({ onNavigate }) => {
           }
           trend={cluster ? `Epoch ${cluster.current_epoch}` : '—'}
           trendColor="neutral"
+          isLoading={isLoading && !cluster}
         />
 
         <StatCard
@@ -151,6 +161,7 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({ onNavigate }) => {
           description={`${replicaNodes.length} Active Replicas`}
           trend={!isBackendConnected ? '—' : hasLag ? 'Lagging' : 'In Sync'}
           trendColor={hasLag ? 'warning' : 'success'}
+          isLoading={isLoading && !cluster}
         />
 
         <StatCard
@@ -159,17 +170,27 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({ onNavigate }) => {
           icon={<Clock className="w-4 h-4 text-amber-400" />}
           description={
             maxLagNode
-              ? `${maxLagNode.name} (delay: ${maxLagNode.replication_delay_ms}ms)`
+              ? `${maxLagNode.name} (${maxLagNode.replication_delay_ms}ms delay)`
               : 'All replicas caught up'
           }
           trend={
             maxLagNode ? `+${maxLagNode.replication_delay_ms}ms` : '0ms'
           }
           trendColor={hasLag ? 'warning' : 'success'}
+          isLoading={isLoading && !cluster}
         />
       </div>
 
-      {/* ── Node Fleet Health & Cluster Telemetry (Stage 4D) ────────────────── */}
+      {/* 3. Live Cluster Topology (Centerpiece) */}
+      <ClusterTopology
+        cluster={cluster}
+        replication={replication}
+        isLoading={isLoading}
+        isBackendConnected={isBackendConnected}
+        title="Live Cluster Topology"
+      />
+
+      {/* 4. Fleet Health & Cluster Telemetry Invariants */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <NodeHealthSummary
           nodes={nodes}
@@ -184,23 +205,14 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({ onNavigate }) => {
         />
       </div>
 
-      {/* ── Live Cluster Topology ───────────────────────────────────────────── */}
-      <ClusterTopology
-        cluster={cluster}
-        replication={replication}
-        isLoading={isLoading}
-        isBackendConnected={isBackendConnected}
-        title="Live Cluster Topology"
-      />
-
-      {/* ── LSN Sync Chart ──────────────────────────────────────────────────── */}
-      <div className="rounded-lg border border-[#30363d] bg-[#161b22] p-5">
+      {/* 5. LSN Sync Alignment Monitoring Chart */}
+      <div className="rounded-lg border border-[#30363d] bg-[#161b22] p-4 sm:p-5">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h3 className="text-sm font-semibold text-[#e6edf3]">LSN Sync Alignment</h3>
+            <h2 className="text-sm font-semibold text-[#e6edf3]">LSN Sync Alignment</h2>
             <p className="text-xs text-[#7d8590] mt-0.5">Applied Log Sequence Number vs Replication Lag per node</p>
           </div>
-          <Activity className="w-4 h-4 text-[#7d8590]" />
+          <Activity className="w-4 h-4 text-[#7d8590]" aria-hidden="true" />
         </div>
 
         <div className="h-52 w-full">
@@ -241,32 +253,32 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({ onNavigate }) => {
           )}
         </div>
 
-        <div className="mt-3 pt-3 border-t border-[#30363d] text-xs text-[#7d8590] flex items-center justify-between">
-          <span>Primary WAL Head: LSN {primaryLsn}</span>
+        <div className="mt-3 pt-3 border-t border-[#30363d] text-xs text-[#7d8590] flex flex-wrap items-center justify-between gap-2">
+          <span>Primary WAL Head: <span className="font-mono text-[#e6edf3]">LSN {primaryLsn}</span></span>
           <span
-            className={`font-mono ${
+            className={`font-mono font-medium ${
               totalPendingLag > 0 ? 'text-amber-400' : 'text-emerald-400'
             }`}
           >
-            {totalPendingLag} pending commits
+            {totalPendingLag} pending commits across cluster
           </span>
         </div>
       </div>
 
-
-      {/* Recent Audit Events Section */}
-      <div className="rounded-lg border border-[#30363d] bg-[#161b22] p-5">
+      {/* 6. Recent System Audit Trail */}
+      <div className="rounded-lg border border-[#30363d] bg-[#161b22] p-4 sm:p-5">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h3 className="text-sm font-semibold text-[#e6edf3]">Recent System Audit Trail</h3>
+            <h2 className="text-sm font-semibold text-[#e6edf3]">Recent System Audit Trail</h2>
             <p className="text-xs text-[#7d8590] mt-0.5">Real-time replication and failover event dispatch</p>
           </div>
           {onNavigate && (
             <button
               onClick={() => onNavigate('events')}
-              className="text-xs text-blue-400 hover:text-blue-300 cursor-pointer flex items-center gap-1 transition-colors"
+              className="text-xs text-blue-400 hover:text-blue-300 cursor-pointer flex items-center gap-1 transition-colors font-medium"
+              aria-label="View all system audit logs"
             >
-              View all logs <ArrowUpRight className="w-3.5 h-3.5" />
+              View all logs <ArrowUpRight className="w-3.5 h-3.5" aria-hidden="true" />
             </button>
           )}
         </div>
@@ -277,13 +289,13 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({ onNavigate }) => {
               No audit events logged yet.
             </div>
           ) : (
-            <table className="w-full text-left text-xs">
+            <table className="w-full text-left text-xs" aria-label="Recent audit events">
               <thead>
                 <tr className="border-b border-[#30363d] text-[#7d8590] uppercase tracking-wider">
-                  <th className="py-2.5 px-3 font-medium">Timestamp</th>
-                  <th className="py-2.5 px-3 font-medium">Event Type</th>
-                  <th className="py-2.5 px-3 font-medium">Node</th>
-                  <th className="py-2.5 px-3 font-medium">Description</th>
+                  <th scope="col" className="py-2.5 px-3 font-medium">Timestamp</th>
+                  <th scope="col" className="py-2.5 px-3 font-medium">Event Type</th>
+                  <th scope="col" className="py-2.5 px-3 font-medium">Node</th>
+                  <th scope="col" className="py-2.5 px-3 font-medium">Description</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#21262d]">
