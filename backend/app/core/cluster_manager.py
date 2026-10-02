@@ -226,6 +226,8 @@ class ClusterManager:
             raise KeyError(f"Node '{node_id}' not found.")
         if node.role != NodeRole.REPLICA:
             raise ValueError(f"Node '{node_id}' is a {node.role.value}. Delay can only be set on REPLICA nodes.")
+        if delay_ms < 0:
+            raise ValueError(f"Replication delay cannot be negative (got {delay_ms}ms).")
 
         old_delay = node.replication_delay_ms
         node.replication_delay_ms = delay_ms
