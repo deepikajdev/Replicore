@@ -88,6 +88,24 @@ export interface ReplicationStatus {
 export type ReplicationStatusResponse = ReplicationStatus
 export type ClusterState = ClusterStatus
 
+// ----- Metrics / History Models (Stage 4D) -----
+
+export interface ReplicaMetricsSample {
+  nodeId: string
+  name: string
+  appliedLsn: number
+  lagLsn: number
+  pendingQueue: number
+}
+
+export interface MetricsSample {
+  timestamp: string
+  time: number
+  primaryLsn: number
+  replicas: ReplicaMetricsSample[]
+  [key: string]: unknown
+}
+
 // ----- Health / System Models -----
 
 export interface HealthStatus {

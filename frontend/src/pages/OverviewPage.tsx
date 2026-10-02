@@ -22,6 +22,8 @@ import {
 import { StatCard } from '../components/StatCard'
 import { SectionHeader } from '../components/SectionHeader'
 import { ClusterTopology } from '../components/ClusterTopology'
+import { NodeHealthSummary } from '../components/NodeHealthSummary'
+import { ClusterTelemetryCard } from '../components/ClusterTelemetryCard'
 import { useCluster } from '../hooks/useCluster'
 import type { PageId } from '../types'
 
@@ -164,6 +166,21 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({ onNavigate }) => {
             maxLagNode ? `+${maxLagNode.replication_delay_ms}ms` : '0ms'
           }
           trendColor={hasLag ? 'warning' : 'success'}
+        />
+      </div>
+
+      {/* ── Node Fleet Health & Cluster Telemetry (Stage 4D) ────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <NodeHealthSummary
+          nodes={nodes}
+          isBackendConnected={isBackendConnected}
+          autoFailover={cluster?.auto_failover_enabled}
+          epoch={cluster?.current_epoch}
+        />
+        <ClusterTelemetryCard
+          cluster={cluster}
+          replication={replication}
+          isBackendConnected={isBackendConnected}
         />
       </div>
 

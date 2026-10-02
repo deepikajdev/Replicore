@@ -3,10 +3,13 @@ import { RefreshCw, GitCommit, Layers, Inbox } from 'lucide-react'
 import { SectionHeader } from '../components/SectionHeader'
 import { StatCard } from '../components/StatCard'
 import { StatusBadge } from '../components/StatusBadge'
+import { ReplicationLagChart } from '../components/ReplicationLagChart'
+import { LsnProgressChart } from '../components/LsnProgressChart'
+import { ReplicaLagBarChart } from '../components/ReplicaLagBarChart'
 import { useCluster } from '../hooks/useCluster'
 
 export const ReplicationPage: React.FC = () => {
-  const { replication, cluster, isLoading } = useCluster()
+  const { replication, cluster, metricsHistory, isLoading } = useCluster()
 
   const replicas = replication?.replicas ?? []
   const primaryLsn = replication?.primary_lsn ?? cluster?.current_primary_lsn ?? 0
@@ -66,6 +69,23 @@ export const ReplicationPage: React.FC = () => {
           trendColor={maxLag > 0 ? 'warning' : 'success'}
         />
       </div>
+
+      {/* Real-time Telemetry Charts (Stage 4D) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <ReplicationLagChart
+          history={metricsHistory}
+          replicas={replicas}
+          isLoading={isLoading}
+        />
+        <LsnProgressChart
+          history={metricsHistory}
+          replicas={replicas}
+          isLoading={isLoading}
+        />
+      </div>
+
+      {/* Replica Current Lag & Queue Comparison Chart */}
+      <ReplicaLagBarChart replicas={replicas} isLoading={isLoading} />
 
       <div className="rounded-lg border border-[#30363d] bg-[#161b22] p-5">
         <h3 className="text-sm font-semibold text-[#e6edf3] mb-4">Replica Lag & Queue Metrics</h3>

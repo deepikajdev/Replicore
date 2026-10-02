@@ -4,6 +4,7 @@ import type {
   ReplicationStatus,
   AuditEvent,
   HealthStatus,
+  MetricsSample,
 } from '../types'
 
 export interface ClusterContextType {
@@ -12,6 +13,7 @@ export interface ClusterContextType {
   events: AuditEvent[]
   totalEvents: number
   health: HealthStatus | null
+  metricsHistory: MetricsSample[]
   isLoading: boolean
   isBackendConnected: boolean
   lastUpdated: Date | null
