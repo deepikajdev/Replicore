@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
-import { Menu, Server, Radio } from 'lucide-react'
+import { Menu, Server, Radio, RefreshCw, AlertTriangle } from 'lucide-react'
 import { Sidebar } from './Sidebar'
+import { useCluster } from '../hooks/useCluster'
 import type { PageId } from '../types'
 
 interface AppShellProps {
@@ -15,6 +16,7 @@ export const AppShell: React.FC<AppShellProps> = ({
   children,
 }) => {
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const { cluster, isBackendConnected, refreshAll, isLoading } = useCluster()
 
   const pageTitles: Record<PageId, string> = {
     overview: 'Cluster Overview',
@@ -23,6 +25,8 @@ export const AppShell: React.FC<AppShellProps> = ({
     events: 'System Audit Logs',
     simulation: 'Failover & Outage Simulator',
   }
+
+  const primaryNodeId = cluster?.primary_node_id ?? (isBackendConnected ? 'None' : 'Unavailable')
 
   return (
     <div className="min-h-screen bg-[#0d1117] text-[#e6edf3] flex">
@@ -57,20 +61,58 @@ export const AppShell: React.FC<AppShellProps> = ({
           </div>
 
           {/* Right quick stats / actions */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
             <div className="hidden sm:flex items-center gap-2 px-2.5 py-1 rounded bg-[#0d1117] border border-[#30363d] text-xs">
-              <Radio className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
+              <Radio
+                className={`w-3.5 h-3.5 ${
+                  isBackendConnected ? 'text-emerald-400 animate-pulse' : 'text-[#7d8590]'
+                }`}
+              />
               <span className="text-[#7d8590]">Watchdog:</span>
-              <span className="text-[#3fb950] font-mono">1.0s interval</span>
+              <span
+                className={`font-mono ${
+                  isBackendConnected ? 'text-[#3fb950]' : 'text-[#7d8590]'
+                }`}
+              >
+                {isBackendConnected ? '2.0s interval' : 'offline'}
+              </span>
             </div>
 
             <div className="flex items-center gap-2 px-2.5 py-1 rounded bg-[#0d1117] border border-[#30363d] text-xs">
               <Server className="w-3.5 h-3.5 text-blue-400" />
               <span className="text-[#7d8590]">Primary:</span>
-              <span className="text-blue-400 font-mono font-medium">node-1</span>
+              <span className="text-blue-400 font-mono font-medium">{primaryNodeId}</span>
             </div>
+
+            {/* Quick manual refresh button */}
+            <button
+              onClick={() => void refreshAll()}
+              disabled={isLoading}
+              title="Refresh live cluster status"
+              className="p-1.5 rounded bg-[#0d1117] hover:bg-[#1c2128] border border-[#30363d] text-[#7d8590] hover:text-[#e6edf3] transition-colors"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin text-blue-400' : ''}`} />
+            </button>
           </div>
         </header>
+
+        {/* Backend Disconnection Banner */}
+        {!isBackendConnected && !isLoading && (
+          <div className="bg-rose-950/70 border-b border-rose-800/80 px-4 py-2.5 sm:px-6 flex items-center justify-between text-xs text-rose-200">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-rose-400 flex-shrink-0" />
+              <span>
+                Backend disconnected at <strong>http://localhost:8000</strong>. Polling automatically retries every 2.5s.
+              </span>
+            </div>
+            <button
+              onClick={() => void refreshAll()}
+              className="px-2 py-0.5 rounded bg-rose-900/60 hover:bg-rose-850 border border-rose-700/60 font-medium text-[11px]"
+            >
+              Retry Now
+            </button>
+          </div>
+        )}
 
         {/* Page Content */}
         <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto">
@@ -80,3 +122,4 @@ export const AppShell: React.FC<AppShellProps> = ({
     </div>
   )
 }
+

@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { AppShell } from './layouts/AppShell'
+import { ClusterProvider } from './context/ClusterContext'
 import { OverviewPage } from './pages/OverviewPage'
 import { ClusterNodesPage } from './pages/ClusterNodesPage'
 import { ReplicationPage } from './pages/ReplicationPage'
@@ -13,7 +14,7 @@ export const App: React.FC = () => {
   const renderContent = () => {
     switch (currentPage) {
       case 'overview':
-        return <OverviewPage />
+        return <OverviewPage onNavigate={setCurrentPage} />
       case 'nodes':
         return <ClusterNodesPage />
       case 'replication':
@@ -23,15 +24,18 @@ export const App: React.FC = () => {
       case 'simulation':
         return <SimulationPage />
       default:
-        return <OverviewPage />
+        return <OverviewPage onNavigate={setCurrentPage} />
     }
   }
 
   return (
-    <AppShell currentPage={currentPage} onSelectPage={setCurrentPage}>
-      {renderContent()}
-    </AppShell>
+    <ClusterProvider>
+      <AppShell currentPage={currentPage} onSelectPage={setCurrentPage}>
+        {renderContent()}
+      </AppShell>
+    </ClusterProvider>
   )
 }
 
 export default App
+

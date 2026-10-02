@@ -9,6 +9,7 @@ import {
   ChevronRight,
   Shield,
 } from 'lucide-react'
+import { useCluster } from '../hooks/useCluster'
 import type { PageId } from '../types'
 
 interface SidebarProps {
@@ -25,20 +26,37 @@ interface NavItemConfig {
   badge?: string
 }
 
-const NAV_ITEMS: NavItemConfig[] = [
-  { id: 'overview', label: 'Overview', icon: LayoutDashboard },
-  { id: 'nodes', label: 'Cluster Nodes', icon: Server, badge: '3' },
-  { id: 'replication', label: 'Replication', icon: RefreshCw },
-  { id: 'events', label: 'Event Logs', icon: ScrollText },
-  { id: 'simulation', label: 'Simulation', icon: Zap },
-]
-
 export const Sidebar: React.FC<SidebarProps> = ({
   currentPage,
   onSelectPage,
   isOpen,
   onClose,
 }) => {
+  const { cluster, totalEvents, isBackendConnected, health } = useCluster()
+
+  const nodeCount = cluster?.nodes?.length
+  const epoch = cluster?.current_epoch ?? 1
+  const replicationMode = cluster?.replication_mode ?? 'ASYNC'
+  const isHealthy = cluster?.is_healthy ?? false
+
+  const navItems: NavItemConfig[] = [
+    { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+    {
+      id: 'nodes',
+      label: 'Cluster Nodes',
+      icon: Server,
+      badge: nodeCount !== undefined ? String(nodeCount) : undefined,
+    },
+    { id: 'replication', label: 'Replication', icon: RefreshCw },
+    {
+      id: 'events',
+      label: 'Event Logs',
+      icon: ScrollText,
+      badge: totalEvents > 0 ? String(totalEvents) : undefined,
+    },
+    { id: 'simulation', label: 'Simulation', icon: Zap },
+  ]
+
   return (
     <>
       {/* Mobile backdrop */}
@@ -64,7 +82,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <div>
               <div className="flex items-center gap-1.5">
                 <span className="font-semibold text-sm tracking-tight text-[#e6edf3]">REPLICORE</span>
-                <span className="text-[10px] uppercase font-mono px-1 py-0.2 bg-blue-950 text-blue-300 rounded border border-blue-800/60">v0.4</span>
+                <span className="text-[10px] uppercase font-mono px-1 py-0.2 bg-blue-950 text-blue-300 rounded border border-blue-800/60">
+                  {health?.version ? `v${health.version}` : 'v0.1'}
+                </span>
               </div>
               <p className="text-[11px] text-[#7d8590]">HA Replication Lab</p>
             </div>
@@ -75,11 +95,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="px-4 py-3 border-b border-[#21262d]">
           <div className="rounded-md bg-[#0d1117] border border-[#30363d] p-2.5 text-xs flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]" />
-              <span className="text-[#e6edf3] font-medium">Cluster Active</span>
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  !isBackendConnected
+                    ? 'bg-rose-500 shadow-[0_0_6px_rgba(244,63,94,0.8)]'
+                    : isHealthy
+                    ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]'
+                    : 'bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.8)]'
+                }`}
+              />
+              <span className="text-[#e6edf3] font-medium">
+                {!isBackendConnected ? 'Backend Offline' : isHealthy ? 'Cluster Healthy' : 'Cluster Degraded'}
+              </span>
             </div>
             <span className="text-[10px] font-mono text-[#7d8590] bg-[#161b22] px-1.5 py-0.5 rounded border border-[#30363d]">
-              Epoch 1
+              Epoch {epoch}
             </span>
           </div>
         </div>
@@ -90,7 +120,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             Navigation
           </div>
 
-          {NAV_ITEMS.map((item) => {
+          {navItems.map((item) => {
             const Icon = item.icon
             const isActive = currentPage === item.id
 
@@ -135,13 +165,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="p-4 border-t border-[#30363d] bg-[#0d1117]/60">
           <div className="flex items-center justify-between text-[11px] text-[#7d8590]">
             <span className="flex items-center gap-1.5">
-              <Activity className="w-3 h-3 text-emerald-400" />
-              Watchdog Active
+              <Activity
+                className={`w-3 h-3 ${isBackendConnected ? 'text-emerald-400' : 'text-rose-400'}`}
+              />
+              {isBackendConnected ? 'Watchdog Active' : 'Disconnected'}
             </span>
-            <span className="font-mono text-[10px]">ASYNC Mode</span>
+            <span className="font-mono text-[10px]">{replicationMode} Mode</span>
           </div>
         </div>
       </aside>
     </>
   )
 }
+

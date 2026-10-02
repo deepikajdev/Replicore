@@ -2,9 +2,13 @@ import type {
   ClusterStatus,
   ReplicationStatus,
   AuditEventsResponse,
+  HealthStatus,
   RecordWriteRequest,
   RecordResponse,
   PromotionResult,
+  SetDelayRequest,
+  NodeSimulationRequest,
+  ManualFailoverRequest,
 } from '../types'
 import { ApiError } from './errors'
 
@@ -55,50 +59,103 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   }
 }
 
-export const api = {
-  // Cluster endpoints
-  getClusterStatus: (): Promise<ClusterStatus> =>
-    request<ClusterStatus>('/api/cluster/status'),
+// ----- Core Real API Services -----
 
-  getReplicationStatus: (): Promise<ReplicationStatus> =>
-    request<ReplicationStatus>('/api/cluster/replication'),
+export const fetchHealth = (): Promise<HealthStatus> =>
+  request<HealthStatus>('/api/health')
 
-  getAuditEvents: (limit = 50): Promise<AuditEventsResponse> =>
-    request<AuditEventsResponse>(`/api/cluster/events?limit=${encodeURIComponent(limit)}`),
+export const fetchClusterStatus = (): Promise<ClusterStatus> =>
+  request<ClusterStatus>('/api/cluster/status')
 
-  getWal: (): Promise<Record<string, unknown>> =>
-    request<Record<string, unknown>>('/api/cluster/wal'),
+export const fetchClusterEvents = (limit = 50): Promise<AuditEventsResponse> =>
+  request<AuditEventsResponse>(`/api/cluster/events?limit=${encodeURIComponent(limit)}`)
 
-  getHealth: (): Promise<{ status: string }> =>
-    request<{ status: string }>('/health'),
+export const fetchReplicationStatus = (): Promise<ReplicationStatus> =>
+  request<ReplicationStatus>('/api/cluster/replication')
 
-  // Write operations
-  writeRecord: (req: RecordWriteRequest): Promise<RecordResponse> =>
-    request<RecordResponse>('/api/records', {
-      method: 'POST',
-      body: JSON.stringify(req),
-    }),
+// ----- Write & Read Operations -----
 
-  // Failover and Simulation operations
-  triggerFailover: (targetNodeId?: string): Promise<PromotionResult> =>
-    request<PromotionResult>('/api/cluster/failover', {
-      method: 'POST',
-      body: JSON.stringify(targetNodeId ? { target_node_id: targetNodeId } : {}),
-    }),
-
-  simulateNodeFailure: (nodeId: string): Promise<Record<string, unknown>> =>
-    request<Record<string, unknown>>(`/api/cluster/nodes/${encodeURIComponent(nodeId)}/simulate-failure`, {
-      method: 'POST',
-    }),
-
-  simulateNodeRecovery: (nodeId: string): Promise<Record<string, unknown>> =>
-    request<Record<string, unknown>>(`/api/cluster/nodes/${encodeURIComponent(nodeId)}/simulate-recovery`, {
-      method: 'POST',
-    }),
-
-  setReplicationDelay: (nodeId: string, delayMs: number): Promise<Record<string, unknown>> =>
-    request<Record<string, unknown>>(`/api/cluster/nodes/${encodeURIComponent(nodeId)}/replication-delay`, {
-      method: 'PATCH',
-      body: JSON.stringify({ delay_ms: delayMs }),
-    }),
+export const writeRecord = (
+  req: RecordWriteRequest,
+  targetNode?: string
+): Promise<RecordResponse> => {
+  const query = targetNode ? `?target_node=${encodeURIComponent(targetNode)}` : ''
+  return request<RecordResponse>(`/api/data/write${query}`, {
+    method: 'POST',
+    body: JSON.stringify(req),
+  })
 }
+
+export const readData = (
+  node?: string,
+  key?: string
+): Promise<{
+  requested_node: string
+  key: string | null
+  data: unknown
+  is_stale_possible: boolean
+}> => {
+  const params = new URLSearchParams()
+  if (node) params.append('node', node)
+  if (key) params.append('key', key)
+  const qs = params.toString() ? `?${params.toString()}` : ''
+  return request(`/api/data/read${qs}`)
+}
+
+// ----- Failover & Simulation Operations -----
+
+export const triggerFailover = (targetNodeId: string): Promise<PromotionResult> => {
+  const payload: ManualFailoverRequest = { target_node_id: targetNodeId }
+  return request<PromotionResult>('/api/cluster/failover', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export const simulateNodeFailure = (nodeId: string): Promise<{ message: string; node_id: string; status: string }> => {
+  const payload: NodeSimulationRequest = { node_id: nodeId }
+  return request<{ message: string; node_id: string; status: string }>('/api/simulation/node/fail', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export const simulateNodeRecovery = (nodeId: string): Promise<{ message: string; node_id: string; status: string }> => {
+  const payload: NodeSimulationRequest = { node_id: nodeId }
+  return request<{ message: string; node_id: string; status: string }>('/api/simulation/node/recover', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export const setReplicationDelay = (
+  nodeId: string,
+  delayMs: number
+): Promise<{ message: string; node_id: string; delay_ms: number }> => {
+  const payload: SetDelayRequest = { node_id: nodeId, delay_ms: delayMs }
+  return request<{ message: string; node_id: string; delay_ms: number }>('/api/simulation/delay', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+// ----- Centralized Export Object (Backwards Compatible) -----
+
+export const api = {
+  fetchHealth,
+  fetchClusterStatus,
+  fetchClusterEvents,
+  fetchReplicationStatus,
+  getHealth: fetchHealth,
+  getClusterStatus: fetchClusterStatus,
+  getClusterEvents: fetchClusterEvents,
+  getAuditEvents: fetchClusterEvents,
+  getReplicationStatus: fetchReplicationStatus,
+  writeRecord,
+  readData,
+  triggerFailover,
+  simulateNodeFailure,
+  simulateNodeRecovery,
+  setReplicationDelay,
+}
+

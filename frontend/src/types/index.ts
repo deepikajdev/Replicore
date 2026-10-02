@@ -85,6 +85,19 @@ export interface ReplicationStatus {
   timestamp: string
 }
 
+export type ReplicationStatusResponse = ReplicationStatus
+export type ClusterState = ClusterStatus
+
+// ----- Health / System Models -----
+
+export interface HealthStatus {
+  status: string
+  service: string
+  version: string
+  cluster_mode: 'local' | 'postgres' | string
+  is_simulation: boolean
+}
+
 // ----- Audit / Event Models -----
 
 export interface AuditEvent {
@@ -99,6 +112,21 @@ export interface AuditEvent {
 export interface AuditEventsResponse {
   total: number
   events: AuditEvent[]
+}
+
+// ----- Simulation / Operation Requests -----
+
+export interface SetDelayRequest {
+  node_id: string
+  delay_ms: number
+}
+
+export interface NodeSimulationRequest {
+  node_id: string
+}
+
+export interface ManualFailoverRequest {
+  target_node_id: string
 }
 
 // ----- Data / Write Models -----
@@ -138,3 +166,4 @@ export interface NavItem {
   label: string
   icon: string
 }
+
