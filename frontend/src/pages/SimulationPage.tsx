@@ -9,8 +9,13 @@ import {
   CheckCircle,
   AlertCircle,
   RefreshCw,
+  WifiOff,
 } from 'lucide-react'
 import { SectionHeader } from '../components/SectionHeader'
+import { FailoverConfirmationModal, type ConfirmationConfig } from '../components/FailoverConfirmationModal'
+import { FailoverEventTimeline } from '../components/FailoverEventTimeline'
+import { ReadTestControl } from '../components/ReadTestControl'
+import { DemoWorkflowGuide } from '../components/DemoWorkflowGuide'
 import { useCluster } from '../hooks/useCluster'
 import {
   simulateNodeFailure,
@@ -20,9 +25,10 @@ import {
   writeRecord,
 } from '../services/api'
 import { formatErrorMessage } from '../services/errors'
+import type { RecordResponse } from '../types'
 
 export const SimulationPage: React.FC = () => {
-  const { cluster, refreshAll, isBackendConnected } = useCluster()
+  const { cluster, events, refreshAll, isBackendConnected } = useCluster()
 
   const nodes = cluster?.nodes ?? []
   const primaryNode = nodes.find((n) => n.role === 'PRIMARY')
@@ -31,10 +37,17 @@ export const SimulationPage: React.FC = () => {
   const [selectedNode, setSelectedNode] = useState<string>('replica-1')
   const [selectedReplicaForDelay, setSelectedReplicaForDelay] = useState<string>('replica-2')
   const [targetPromotionNode, setTargetPromotionNode] = useState<string>('replica-1')
-  const [delayMs, setDelayMs] = useState<number>(500)
-  const [writeKey, setWriteKey] = useState<string>('user:101')
-  const [writeValue, setWriteValue] = useState<string>('{"active": true}')
+  const [delayMs, setDelayMs] = useState<number>(1000)
+
+  // Write testing state
+  const [writeTargetNode, setWriteTargetNode] = useState<string>('')
+  const [writeKey, setWriteKey] = useState<string>('order:2001')
+  const [writeValue, setWriteValue] = useState<string>('{"status": "CONFIRMED", "amount": 149.99}')
+  const [lastWriteResult, setLastWriteResult] = useState<RecordResponse | null>(null)
+
+  // Status and Confirmation
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false)
+  const [confirmConfig, setConfirmConfig] = useState<ConfirmationConfig | null>(null)
   const [statusMessage, setStatusMessage] = useState<{
     text: string
     type: 'success' | 'error'
@@ -44,15 +57,16 @@ export const SimulationPage: React.FC = () => {
     setStatusMessage({ text, type })
     setTimeout(() => {
       setStatusMessage(null)
-    }, 5000)
+    }, 6000)
   }
 
-  const handleSimulateFailure = async () => {
-    if (!selectedNode) return
+  // --- Failure / Recovery Handlers ---
+
+  const executeFailure = async (nodeId: string) => {
     setIsSubmitting(true)
     try {
-      const res = await simulateNodeFailure(selectedNode)
-      showStatus(res.message || `Node '${selectedNode}' failure simulated successfully.`, 'success')
+      const res = await simulateNodeFailure(nodeId)
+      showStatus(res.message || `Outage injected on node '${nodeId}'. Heartbeat watchdog will detect missed probes.`, 'success')
       await refreshAll()
     } catch (err) {
       showStatus(`Failed to simulate outage: ${formatErrorMessage(err)}`, 'error')
@@ -61,12 +75,32 @@ export const SimulationPage: React.FC = () => {
     }
   }
 
+  const handlePromptFailure = (nodeId: string) => {
+    const target = nodes.find((n) => n.id === nodeId)
+    const isPrimary = target?.role === 'PRIMARY'
+
+    setConfirmConfig({
+      title: isPrimary ? 'Confirm Primary Leader Outage' : 'Confirm Follower Outage',
+      description: `Simulate a hardware failure or network partition on '${nodeId}' (${target?.role ?? 'NODE'}, ${target?.status ?? 'UNKNOWN'}). The heartbeat watchdog will probe the node and declare it DOWN after 3 missed heartbeats.`,
+      impactWarning: isPrimary
+        ? 'Failing the active Primary will immediately disrupt write availability. The cluster will initiate automatic failover election to promote the most up-to-date replica and increment the epoch.'
+        : undefined,
+      targetNodeId: nodeId,
+      actionLabel: isPrimary ? 'Fail Primary Node' : 'Fail Node',
+      isDestructive: true,
+      onConfirm: async () => {
+        setConfirmConfig(null)
+        await executeFailure(nodeId)
+      },
+    })
+  }
+
   const handleSimulateRecovery = async () => {
     if (!selectedNode) return
     setIsSubmitting(true)
     try {
       const res = await simulateNodeRecovery(selectedNode)
-      showStatus(res.message || `Node '${selectedNode}' recovered successfully.`, 'success')
+      showStatus(res.message || `Node '${selectedNode}' connectivity restored. Rejoining cluster.`, 'success')
       await refreshAll()
     } catch (err) {
       showStatus(`Failed to recover node: ${formatErrorMessage(err)}`, 'error')
@@ -75,26 +109,49 @@ export const SimulationPage: React.FC = () => {
     }
   }
 
-  const handleFailoverPromotion = async () => {
+  // --- Manual Failover Handler ---
+
+  const executeFailover = async (targetId: string) => {
+    setIsSubmitting(true)
+    try {
+      const res = await triggerFailover(targetId)
+      showStatus(
+        res.message || `Node '${res.promoted_node_id}' promoted to PRIMARY at epoch ${res.new_epoch}.`,
+        'success'
+      )
+      await refreshAll()
+    } catch (err) {
+      showStatus(`Manual promotion failed: ${formatErrorMessage(err)}`, 'error')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handlePromptFailover = () => {
     const target = targetPromotionNode || replicas[0]?.id
     if (!target) {
       showStatus('No eligible replica available for promotion.', 'error')
       return
     }
-    setIsSubmitting(true)
-    try {
-      const res = await triggerFailover(target)
-      showStatus(
-        res.message || `Node '${res.promoted_node_id}' promoted at epoch ${res.new_epoch}.`,
-        'success'
-      )
-      await refreshAll()
-    } catch (err) {
-      showStatus(`Promotion failed: ${formatErrorMessage(err)}`, 'error')
-    } finally {
-      setIsSubmitting(false)
-    }
+
+    const currentEpoch = cluster?.current_epoch ?? 1
+    const currentPrimary = primaryNode?.id ?? 'None'
+
+    setConfirmConfig({
+      title: 'Confirm Manual Failover Promotion',
+      description: `Promote replica '${target}' to PRIMARY. This will increment the leadership epoch from ${currentEpoch} to ${currentEpoch + 1}.`,
+      impactWarning: `Current primary '${currentPrimary}' will be demoted and fenced to prevent split-brain writes. Any subsequent writes directed to '${currentPrimary}' will be rejected with HTTP 409 Conflict.`,
+      targetNodeId: target,
+      actionLabel: `Promote '${target}' to Primary`,
+      isDestructive: false,
+      onConfirm: async () => {
+        setConfirmConfig(null)
+        await executeFailover(target)
+      },
+    })
   }
+
+  // --- Delay Handler ---
 
   const handleApplyDelay = async () => {
     const target = selectedReplicaForDelay || replicas[0]?.id
@@ -105,25 +162,36 @@ export const SimulationPage: React.FC = () => {
     setIsSubmitting(true)
     try {
       const res = await setReplicationDelay(target, delayMs)
-      showStatus(res.message || `Updated replication delay to ${delayMs}ms.`, 'success')
+      showStatus(res.message || `Configured ${delayMs}ms artificial replication delay on '${target}'.`, 'success')
       await refreshAll()
     } catch (err) {
-      showStatus(`Failed to set delay: ${formatErrorMessage(err)}`, 'error')
+      showStatus(`Failed to configure delay: ${formatErrorMessage(err)}`, 'error')
     } finally {
       setIsSubmitting(false)
     }
   }
 
+  // --- Write Record Handler ---
+
   const handleWriteRecord = async () => {
     if (!writeKey.trim()) {
-      showStatus('Key cannot be empty', 'error')
+      showStatus('Record key is required', 'error')
       return
     }
     setIsSubmitting(true)
+    setLastWriteResult(null)
     try {
-      const res = await writeRecord({ key: writeKey, value: writeValue })
+      const res = await writeRecord(
+        {
+          key: writeKey.trim(),
+          value: writeValue,
+          target_node_id: writeTargetNode || undefined,
+        },
+        writeTargetNode || undefined
+      )
+      setLastWriteResult(res)
       showStatus(
-        `Committed key "${res.key}" at LSN ${res.lsn} (node: ${res.node_id})`,
+        `Write accepted: Key "${res.key}" committed at LSN ${res.lsn} (node: ${res.node_id})`,
         'success'
       )
       await refreshAll()
@@ -134,23 +202,44 @@ export const SimulationPage: React.FC = () => {
     }
   }
 
+  const selectedNodeObj = nodes.find((n) => n.id === selectedNode)
+  const isSelectedNodeDown = selectedNodeObj?.status === 'DOWN' || selectedNodeObj?.status === 'ISOLATED'
+  const isSelectedNodeHealthy = selectedNodeObj?.status === 'HEALTHY'
+
   return (
     <div className="space-y-6">
+      {/* Confirmation Modal */}
+      <FailoverConfirmationModal
+        config={confirmConfig}
+        onClose={() => setConfirmConfig(null)}
+        isSubmitting={isSubmitting}
+      />
+
+      {/* Header */}
       <SectionHeader
-        title="Failover & Outage Simulator"
-        description="Inject chaos scenarios, simulate node failure / network partitions, trigger failovers, and test epoch fencing."
+        title="Simulation & Failover Operations Console"
+        description="Inject node failure, test automatic watchdog failover, execute manual promotion, and verify split-brain fencing."
         action={
           <div className="flex items-center gap-2">
-            <span className="px-2.5 py-1 rounded bg-amber-950/50 border border-amber-800/60 text-amber-300 text-xs font-medium flex items-center gap-1.5">
-              <Zap className="w-3.5 h-3.5 text-amber-400" />
-              Simulation Controls Active
-            </span>
+            {!isBackendConnected ? (
+              <span className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-rose-950/60 border border-rose-800/60 text-rose-300 text-xs font-medium">
+                <WifiOff className="w-3.5 h-3.5 text-rose-400" />
+                Backend Offline
+              </span>
+            ) : (
+              <span className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-amber-950/50 border border-amber-800/60 text-amber-300 text-xs font-medium">
+                <Zap className="w-3.5 h-3.5 text-amber-400" />
+                Live Control Engine Active
+              </span>
+            )}
           </div>
         }
       />
 
+      {/* Notification Banner */}
       {statusMessage && (
         <div
+          role="alert"
           className={`p-3 rounded-lg border text-xs flex items-center gap-2 ${
             statusMessage.type === 'success'
               ? 'bg-emerald-950/50 border-emerald-800/60 text-emerald-300'
@@ -166,96 +255,119 @@ export const SimulationPage: React.FC = () => {
         </div>
       )}
 
-      {/* Grid of Simulation Scenarios */}
+      {/* Instructional Walkthrough Runbook */}
+      <DemoWorkflowGuide />
+
+      {/* Core Simulation Controls (3 Cards) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Card 1: Node Outage Simulation */}
+        {/* Card 1: Node Outage Injection & Recovery */}
         <div className="rounded-lg border border-[#30363d] bg-[#161b22] p-5 flex flex-col justify-between">
           <div>
             <div className="flex items-center gap-2 text-[#e6edf3] font-semibold text-sm mb-2">
               <AlertTriangle className="w-4 h-4 text-rose-400" />
-              <h3>Node Outage Injection</h3>
+              <h3>Node Outage & Recovery</h3>
             </div>
             <p className="text-xs text-[#7d8590] mb-4">
-              Mark a node as unreachable. The watchdog triggers missed heartbeats until the threshold (3) is met.
+              Inject a simulated crash or partition. Watchdog detects missed heartbeats and marks node DOWN.
             </p>
 
             <div className="space-y-3">
               <div>
-                <label className="text-xs text-[#7d8590] block mb-1">Target Node</label>
+                <label className="text-xs text-[#7d8590] block mb-1">Target Cluster Node</label>
                 <select
                   value={selectedNode}
                   onChange={(e) => setSelectedNode(e.target.value)}
-                  className="w-full bg-[#0d1117] border border-[#30363d] rounded px-3 py-1.5 text-xs text-[#e6edf3] focus:border-blue-500 focus:outline-none"
+                  className="w-full bg-[#0d1117] border border-[#30363d] rounded px-3 py-1.5 text-xs text-[#e6edf3] font-mono focus:border-blue-500 focus:outline-none"
                 >
                   {nodes.map((node) => (
                     <option key={node.id} value={node.id}>
-                      {node.id} ({node.role} - {node.status})
+                      {node.id} ({node.role} • {node.status}{node.is_fenced ? ' • FENCED' : ''})
                     </option>
                   ))}
-                  {nodes.length === 0 && (
-                    <>
-                      <option value="primary">primary (Primary)</option>
-                      <option value="replica-1">replica-1 (Replica)</option>
-                      <option value="replica-2">replica-2 (Replica)</option>
-                    </>
-                  )}
+                  {nodes.length === 0 && <option value="primary">primary</option>}
                 </select>
               </div>
+
+              {selectedNodeObj && (
+                <div className="p-2.5 rounded bg-[#0d1117] border border-[#21262d] text-xs space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[#7d8590]">Current Role:</span>
+                    <span className={`font-mono font-semibold ${selectedNodeObj.role === 'PRIMARY' ? 'text-blue-400' : 'text-purple-400'}`}>
+                      {selectedNodeObj.role}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[#7d8590]">Status:</span>
+                    <span
+                      className={`font-mono font-semibold ${
+                        selectedNodeObj.status === 'HEALTHY'
+                          ? 'text-emerald-400'
+                          : selectedNodeObj.status === 'DEGRADED'
+                          ? 'text-amber-400'
+                          : 'text-rose-400'
+                      }`}
+                    >
+                      {selectedNodeObj.status}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[#7d8590]">Fencing State:</span>
+                    <span className={`font-mono ${selectedNodeObj.is_fenced ? 'text-rose-400 font-bold' : 'text-[#7d8590]'}`}>
+                      {selectedNodeObj.is_fenced ? 'FENCED (Split-Brain Guard)' : 'Not Fenced'}
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
           <div className="flex items-center gap-2 mt-6">
             <button
-              onClick={handleSimulateFailure}
-              disabled={isSubmitting || !isBackendConnected}
-              className="flex-1 py-1.5 px-3 rounded bg-rose-600/20 hover:bg-rose-600/30 disabled:opacity-50 text-rose-300 border border-rose-600/40 text-xs font-medium transition-colors"
+              onClick={() => handlePromptFailure(selectedNode)}
+              disabled={isSubmitting || !isBackendConnected || isSelectedNodeDown}
+              className="flex-1 py-2 px-3 rounded bg-rose-600/20 hover:bg-rose-600/30 disabled:opacity-40 text-rose-300 border border-rose-600/40 text-xs font-medium transition-colors cursor-pointer disabled:cursor-not-allowed"
             >
-              Simulate Failure
+              Simulate Outage
             </button>
             <button
               onClick={handleSimulateRecovery}
-              disabled={isSubmitting || !isBackendConnected}
-              className="py-1.5 px-3 rounded bg-[#1c2128] hover:bg-[#21262d] disabled:opacity-50 text-[#e6edf3] border border-[#30363d] text-xs font-medium transition-colors"
+              disabled={isSubmitting || !isBackendConnected || isSelectedNodeHealthy}
+              className="flex-1 py-2 px-3 rounded bg-emerald-600/20 hover:bg-emerald-600/30 disabled:opacity-40 text-emerald-300 border border-emerald-600/40 text-xs font-medium transition-colors cursor-pointer disabled:cursor-not-allowed"
             >
-              Recover
+              Recover Node
             </button>
           </div>
         </div>
 
-        {/* Card 2: Failover & Promotion */}
+        {/* Card 2: Manual Failover Promotion */}
         <div className="rounded-lg border border-[#30363d] bg-[#161b22] p-5 flex flex-col justify-between">
           <div>
             <div className="flex items-center gap-2 text-[#e6edf3] font-semibold text-sm mb-2">
               <ShieldAlert className="w-4 h-4 text-purple-400" />
-              <h3>Replica Promotion & Epoch Fencing</h3>
+              <h3>Manual Failover & Promotion</h3>
             </div>
             <p className="text-xs text-[#7d8590] mb-4">
-              Promote an eligible replica to PRIMARY, increment the epoch, and fence the previous primary to prevent split-brain.
+              Promote an eligible replica to PRIMARY, increment epoch, and fence previous primary against split-brain.
             </p>
 
             <div className="space-y-3">
               <div>
-                <label className="text-xs text-[#7d8590] block mb-1">Target Replica</label>
+                <label className="text-xs text-[#7d8590] block mb-1">Target Replica for Promotion</label>
                 <select
                   value={targetPromotionNode}
                   onChange={(e) => setTargetPromotionNode(e.target.value)}
-                  className="w-full bg-[#0d1117] border border-[#30363d] rounded px-3 py-1.5 text-xs text-[#e6edf3] focus:border-blue-500 focus:outline-none"
+                  className="w-full bg-[#0d1117] border border-[#30363d] rounded px-3 py-1.5 text-xs text-[#e6edf3] font-mono focus:border-blue-500 focus:outline-none"
                 >
                   {replicas.map((rep) => (
                     <option key={rep.id} value={rep.id}>
-                      {rep.id} ({rep.name})
+                      {rep.id} ({rep.name} • LSN {rep.last_applied_lsn} • {rep.status})
                     </option>
                   ))}
-                  {replicas.length === 0 && (
-                    <>
-                      <option value="replica-1">replica-1</option>
-                      <option value="replica-2">replica-2</option>
-                    </>
-                  )}
+                  {replicas.length === 0 && <option value="">No replicas registered</option>}
                 </select>
               </div>
 
-              <div className="space-y-2 text-xs text-[#7d8590]">
+              <div className="space-y-1.5 text-xs text-[#7d8590]">
                 <div className="flex items-center justify-between p-2 rounded bg-[#0d1117] border border-[#21262d]">
                   <span>Current Leader:</span>
                   <span className="font-mono text-[#e6edf3]">
@@ -263,8 +375,8 @@ export const SimulationPage: React.FC = () => {
                   </span>
                 </div>
                 <div className="flex items-center justify-between p-2 rounded bg-[#0d1117] border border-[#21262d]">
-                  <span>Next Epoch:</span>
-                  <span className="font-mono text-purple-400">
+                  <span>Next Leadership Epoch:</span>
+                  <span className="font-mono text-purple-400 font-semibold">
                     Epoch {(cluster?.current_epoch ?? 1) + 1}
                   </span>
                 </div>
@@ -273,12 +385,12 @@ export const SimulationPage: React.FC = () => {
           </div>
 
           <button
-            onClick={handleFailoverPromotion}
-            disabled={isSubmitting || !isBackendConnected}
-            className="w-full mt-6 py-2 px-3 rounded bg-blue-600/20 hover:bg-blue-600/30 disabled:opacity-50 text-blue-300 border border-blue-600/40 text-xs font-medium transition-colors flex items-center justify-center gap-2"
+            onClick={handlePromptFailover}
+            disabled={isSubmitting || !isBackendConnected || replicas.length === 0}
+            className="w-full mt-6 py-2 px-3 rounded bg-blue-600/20 hover:bg-blue-600/30 disabled:opacity-40 text-blue-300 border border-blue-600/40 text-xs font-semibold transition-colors flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed"
           >
             <Play className="w-3.5 h-3.5" />
-            Trigger Failover Promotion
+            Execute Failover Promotion
           </button>
         </div>
 
@@ -290,7 +402,7 @@ export const SimulationPage: React.FC = () => {
               <h3>Replication Lag Tuner</h3>
             </div>
             <p className="text-xs text-[#7d8590] mb-4">
-              Inject artificial latency onto a follower replica to observe real-time LSN lag and election priority.
+              Inject artificial replication delay to create follower lag and demonstrate eventual consistency.
             </p>
 
             <div className="space-y-3">
@@ -299,25 +411,20 @@ export const SimulationPage: React.FC = () => {
                 <select
                   value={selectedReplicaForDelay}
                   onChange={(e) => setSelectedReplicaForDelay(e.target.value)}
-                  className="w-full bg-[#0d1117] border border-[#30363d] rounded px-3 py-1.5 text-xs text-[#e6edf3] focus:border-blue-500 focus:outline-none"
+                  className="w-full bg-[#0d1117] border border-[#30363d] rounded px-3 py-1.5 text-xs text-[#e6edf3] font-mono focus:border-blue-500 focus:outline-none"
                 >
                   {replicas.map((rep) => (
                     <option key={rep.id} value={rep.id}>
-                      {rep.id} (Current Delay: {rep.replication_delay_ms}ms)
+                      {rep.id} (Configured: {rep.replication_delay_ms}ms)
                     </option>
                   ))}
-                  {replicas.length === 0 && (
-                    <>
-                      <option value="replica-1">replica-1</option>
-                      <option value="replica-2">replica-2</option>
-                    </>
-                  )}
+                  {replicas.length === 0 && <option value="">No replicas available</option>}
                 </select>
               </div>
 
               <div className="flex items-center justify-between text-xs">
-                <span className="text-[#7d8590]">Latency Delay:</span>
-                <span className="font-mono text-[#e6edf3] font-semibold">{delayMs} ms</span>
+                <span className="text-[#7d8590]">Artificial Delay:</span>
+                <span className="font-mono text-amber-400 font-semibold">{delayMs} ms</span>
               </div>
               <input
                 type="range"
@@ -326,63 +433,114 @@ export const SimulationPage: React.FC = () => {
                 step="50"
                 value={delayMs}
                 onChange={(e) => setDelayMs(Number(e.target.value))}
-                className="w-full accent-blue-500 cursor-pointer"
+                className="w-full accent-amber-500 cursor-pointer"
               />
+              <div className="flex justify-between text-[10px] text-[#7d8590] font-mono">
+                <span>0ms (Immediate)</span>
+                <span>2500ms</span>
+                <span>5000ms</span>
+              </div>
             </div>
           </div>
 
           <button
             onClick={handleApplyDelay}
-            disabled={isSubmitting || !isBackendConnected}
-            className="w-full mt-6 py-1.5 px-3 rounded bg-[#1c2128] hover:bg-[#21262d] disabled:opacity-50 text-[#e6edf3] border border-[#30363d] text-xs font-medium transition-colors"
+            disabled={isSubmitting || !isBackendConnected || replicas.length === 0}
+            className="w-full mt-6 py-2 px-3 rounded bg-[#21262d] hover:bg-[#30363d] disabled:opacity-40 text-[#e6edf3] border border-[#30363d] text-xs font-medium transition-colors cursor-pointer disabled:cursor-not-allowed"
           >
             Apply Delay ({delayMs}ms)
           </button>
         </div>
       </div>
 
-      {/* Write Ingestion Simulator */}
-      <div className="rounded-lg border border-[#30363d] bg-[#161b22] p-5">
-        <h3 className="text-sm font-semibold text-[#e6edf3] mb-1">Write Pipeline Test</h3>
-        <p className="text-xs text-[#7d8590] mb-4">
-          Send test records to verify replication propagation, WAL monotonic ordering, or fenced node rejection (409 Conflict).
-        </p>
-
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
-          <div>
-            <label className="text-xs text-[#7d8590] block mb-1">Record Key</label>
-            <input
-              type="text"
-              value={writeKey}
-              onChange={(e) => setWriteKey(e.target.value)}
-              className="w-full bg-[#0d1117] border border-[#30363d] rounded px-3 py-1.5 text-xs text-[#e6edf3] font-mono focus:border-blue-500 focus:outline-none"
-            />
+      {/* Operations Test Grid: Write Pipeline & Read Consistency */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Write Pipeline Test */}
+        <div className="rounded-lg border border-[#30363d] bg-[#161b22] p-5">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <Send className="w-4 h-4 text-emerald-400" />
+                <h3 className="text-sm font-semibold text-[#e6edf3]">
+                  Write Pipeline & Split-Brain Fencing Test
+                </h3>
+              </div>
+              <p className="text-xs text-[#7d8590] mt-0.5">
+                Execute transactional writes. Direct write to demoted nodes to observe HTTP 409 Conflict.
+              </p>
+            </div>
           </div>
 
-          <div className="sm:col-span-2">
-            <label className="text-xs text-[#7d8590] block mb-1">Record Value</label>
-            <input
-              type="text"
-              value={writeValue}
-              onChange={(e) => setWriteValue(e.target.value)}
-              className="w-full bg-[#0d1117] border border-[#30363d] rounded px-3 py-1.5 text-xs text-[#e6edf3] font-mono focus:border-blue-500 focus:outline-none"
-            />
+          <div className="space-y-3 mb-4">
+            <div>
+              <label className="text-xs text-[#7d8590] block mb-1">
+                Target Node (Default: Current Primary)
+              </label>
+              <select
+                value={writeTargetNode}
+                onChange={(e) => setWriteTargetNode(e.target.value)}
+                className="w-full bg-[#0d1117] border border-[#30363d] rounded px-3 py-1.5 text-xs text-[#e6edf3] font-mono focus:border-blue-500 focus:outline-none"
+              >
+                <option value="">Auto-Route to Current Primary ({primaryNode?.id ?? 'None'})</option>
+                {nodes.map((node) => (
+                  <option key={node.id} value={node.id}>
+                    Direct to {node.id} ({node.role} • {node.status}{node.is_fenced ? ' • FENCED' : ''})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="text-xs text-[#7d8590] block mb-1">Key</label>
+                <input
+                  type="text"
+                  value={writeKey}
+                  onChange={(e) => setWriteKey(e.target.value)}
+                  className="w-full bg-[#0d1117] border border-[#30363d] rounded px-3 py-1.5 text-xs text-[#e6edf3] font-mono focus:border-blue-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="text-xs text-[#7d8590] block mb-1">Value (Payload / JSON)</label>
+                <input
+                  type="text"
+                  value={writeValue}
+                  onChange={(e) => setWriteValue(e.target.value)}
+                  className="w-full bg-[#0d1117] border border-[#30363d] rounded px-3 py-1.5 text-xs text-[#e6edf3] font-mono focus:border-blue-500 focus:outline-none"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between pt-1">
+            <button
+              onClick={handleWriteRecord}
+              disabled={isSubmitting || !isBackendConnected}
+              className="py-1.5 px-4 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-semibold transition-colors flex items-center gap-2 cursor-pointer disabled:cursor-not-allowed"
+            >
+              {isSubmitting ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Send className="w-3.5 h-3.5" />
+              )}
+              Commit Write Transaction
+            </button>
+
+            {lastWriteResult && (
+              <span className="text-[11px] font-mono text-emerald-400 bg-emerald-950/40 px-2.5 py-1 rounded border border-emerald-800/50">
+                LSN {lastWriteResult.lsn} Committed ({lastWriteResult.node_id})
+              </span>
+            )}
           </div>
         </div>
 
-        <button
-          onClick={handleWriteRecord}
-          disabled={isSubmitting || !isBackendConnected}
-          className="py-1.5 px-4 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-medium transition-colors flex items-center gap-2"
-        >
-          {isSubmitting ? (
-            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-          ) : (
-            <Send className="w-3.5 h-3.5" />
-          )}
-          Submit Write to Primary
-        </button>
+        {/* Read Query & Eventual Consistency Test */}
+        <ReadTestControl nodes={nodes} isBackendConnected={isBackendConnected} />
       </div>
+
+      {/* Lifecycle & Failover Event Stream */}
+      <FailoverEventTimeline events={events} limit={12} />
     </div>
   )
 }
