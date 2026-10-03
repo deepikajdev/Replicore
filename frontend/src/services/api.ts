@@ -12,11 +12,15 @@ import type {
 } from '../types'
 import { ApiError } from './errors'
 
-const BASE_URL: string =
-  (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'http://localhost:8000'
+const rawBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim()
+// In development without an explicit VITE_API_BASE_URL, default to empty string so requests
+// route through the existing Vite proxy (/api -> http://localhost:8000).
+// In production, use VITE_API_BASE_URL configured for the deployment.
+const BASE_URL: string = rawBaseUrl ? rawBaseUrl.replace(/\/+$/, '') : ''
 
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-  const url = `${BASE_URL}${endpoint}`
+  const normalizedEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`
+  const url = `${BASE_URL}${normalizedEndpoint}`
   const headers = new Headers(options.headers ?? {})
 
   if (!headers.has('Content-Type') && options.body && typeof options.body === 'string') {

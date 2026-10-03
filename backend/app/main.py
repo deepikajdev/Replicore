@@ -39,10 +39,10 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Enable CORS for local React development
+# Enable CORS for frontend clients (configurable via CORS_ALLOWED_ORIGINS)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

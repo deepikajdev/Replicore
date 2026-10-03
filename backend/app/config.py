@@ -1,6 +1,6 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
-from typing import Literal
+from typing import Literal, Optional
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -13,6 +13,23 @@ class Settings(BaseSettings):
     APP_VERSION: str = "0.1.0"
     DEBUG: bool = False
     API_PORT: int = 8000
+    PORT: Optional[int] = None
+    CORS_ALLOWED_ORIGINS: str = "*"
+
+    @property
+    def cors_origins(self) -> list[str]:
+        raw = self.CORS_ALLOWED_ORIGINS.strip()
+        if not raw or raw == "*":
+            return ["*"]
+        if raw.startswith("[") and raw.endswith("]"):
+            try:
+                import json
+                parsed = json.loads(raw)
+                if isinstance(parsed, list):
+                    return [str(o).strip() for o in parsed if str(o).strip()]
+            except Exception:
+                pass
+        return [origin.strip() for origin in raw.split(",") if origin.strip()]
 
     # Cluster Engine Mode: "local" (in-process SQLite multi-node simulation) or "postgres" (multi-container)
     REPLICORE_CLUSTER_MODE: Literal["local", "postgres"] = "local"
