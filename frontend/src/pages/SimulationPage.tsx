@@ -155,18 +155,33 @@ export const SimulationPage: React.FC = () => {
 
   // --- Replication Delay Handler ---
 
+  const handleSelectReplicaForDelay = (nodeId: string) => {
+    setSelectedReplicaForDelay(nodeId)
+    const target = replicas.find((r) => r.id === nodeId)
+    if (target) {
+      setDelayMs(target.replication_delay_ms)
+    }
+  }
+
   const handleApplyDelay = async () => {
-    if (!selectedReplicaForDelay) return
+    if (!selectedReplicaForDelay) {
+      showStatus('Please select a target replica node.', 'error')
+      return
+    }
+    if (isNaN(delayMs) || delayMs < 0 || delayMs > 60000) {
+      showStatus('Replication delay must be between 0ms and 60,000ms (60 seconds).', 'error')
+      return
+    }
     setIsSubmitting(true)
     try {
       const res = await setReplicationDelay(selectedReplicaForDelay, delayMs)
       showStatus(
-        res.message || `Replication delay on '${selectedReplicaForDelay}' set to ${delayMs}ms.`,
+        res.message || `Replication delay on '${selectedReplicaForDelay}' set to ${delayMs.toLocaleString()}ms (${(delayMs / 1000).toFixed(2)}s).`,
         'success'
       )
       await refreshAll()
     } catch (err) {
-      showStatus(`Failed to set delay: ${formatErrorMessage(err)}`, 'error')
+      showStatus(`Failed to configure replication delay: ${formatErrorMessage(err)}`, 'error')
     } finally {
       setIsSubmitting(false)
     }
@@ -517,38 +532,99 @@ export const SimulationPage: React.FC = () => {
 
               <div className="space-y-3">
                 <div>
-                  <label className="text-xs text-[#7d8590] block mb-1">Target Replica</label>
+                  <label className="text-xs text-[#7d8590] block mb-1">Target Follower Replica</label>
                   <select
                     value={selectedReplicaForDelay}
-                    onChange={(e) => setSelectedReplicaForDelay(e.target.value)}
+                    onChange={(e) => handleSelectReplicaForDelay(e.target.value)}
                     className="w-full bg-[#0d1117] border border-[#30363d] rounded px-3 py-1.5 text-xs text-[#e6edf3] font-mono focus:border-amber-500 focus:outline-none"
                   >
                     {replicas.map((rep) => (
                       <option key={rep.id} value={rep.id}>
-                        {rep.id} (Configured: {rep.replication_delay_ms}ms)
+                        {rep.id} ({rep.name} • Active: {rep.replication_delay_ms}ms)
                       </option>
                     ))}
                     {replicas.length === 0 && <option value="">No replicas available</option>}
                   </select>
                 </div>
 
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-[#7d8590]">Artificial Delay:</span>
-                  <span className="font-mono text-amber-400 font-semibold">{delayMs} ms</span>
+                {/* Delay Value Display & Number Input */}
+                <div className="p-2.5 rounded bg-[#0d1117] border border-[#21262d] space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-[#7d8590]">Configured Delay:</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-mono text-amber-400 font-semibold text-sm">
+                        {delayMs.toLocaleString()} ms
+                      </span>
+                      <span className="text-[11px] text-[#7d8590] font-mono">
+                        ({(delayMs / 1000).toFixed(2)}s)
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="range"
+                      min="0"
+                      max="10000"
+                      step="50"
+                      value={Math.min(10000, delayMs)}
+                      onChange={(e) => setDelayMs(Number(e.target.value))}
+                      className="flex-1 accent-amber-500 cursor-pointer"
+                      aria-label="Replication delay slider"
+                    />
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        min="0"
+                        max="60000"
+                        step="50"
+                        value={delayMs}
+                        onChange={(e) => {
+                          const val = Number(e.target.value)
+                          if (!isNaN(val)) setDelayMs(Math.max(0, Math.min(60000, val)))
+                        }}
+                        className="w-20 bg-[#161b22] border border-[#30363d] rounded px-2 py-1 text-xs text-[#e6edf3] font-mono text-right focus:border-amber-500 focus:outline-none"
+                        aria-label="Direct delay millisecond input"
+                      />
+                      <span className="text-[10px] text-[#7d8590] font-mono">ms</span>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-between text-[10px] text-[#7d8590] font-mono">
+                    <span>0ms (Immediate)</span>
+                    <span>5,000ms (5s)</span>
+                    <span>10,000ms (10s)</span>
+                  </div>
                 </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="5000"
-                  step="50"
-                  value={delayMs}
-                  onChange={(e) => setDelayMs(Number(e.target.value))}
-                  className="w-full accent-amber-500 cursor-pointer"
-                />
-                <div className="flex justify-between text-[10px] text-[#7d8590] font-mono">
-                  <span>0ms (Immediate)</span>
-                  <span>2500ms</span>
-                  <span>5000ms</span>
+
+                {/* Preset Quick-Buttons */}
+                <div>
+                  <span className="text-[11px] text-[#7d8590] block mb-1.5 font-medium">Quick Presets:</span>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {[
+                      { label: '0ms', ms: 0 },
+                      { label: '500ms', ms: 500 },
+                      { label: '2,000ms', ms: 2000 },
+                      { label: '5,000ms', ms: 5000 },
+                    ].map((preset) => (
+                      <button
+                        key={preset.ms}
+                        type="button"
+                        onClick={() => setDelayMs(preset.ms)}
+                        className={`px-2 py-1 rounded text-[11px] font-mono transition-colors border ${
+                          delayMs === preset.ms
+                            ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-semibold'
+                            : 'bg-[#0d1117] text-[#7d8590] border-[#30363d] hover:text-[#e6edf3] hover:border-[#484f58]'
+                        }`}
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="text-[11px] text-[#7d8590]">
+                  Supported range: <span className="font-mono text-[#c9d1d9]">0 - 60,000 ms</span> (up to 60s max)
                 </div>
               </div>
             </div>
@@ -556,9 +632,14 @@ export const SimulationPage: React.FC = () => {
             <button
               onClick={handleApplyDelay}
               disabled={isSubmitting || !isBackendConnected || replicas.length === 0}
-              className="w-full mt-6 py-2 px-3 rounded bg-amber-600/20 hover:bg-amber-600/30 disabled:opacity-40 text-amber-300 border border-amber-600/40 text-xs font-medium transition-colors cursor-pointer disabled:cursor-not-allowed"
+              className="w-full mt-6 py-2 px-3 rounded bg-amber-600/20 hover:bg-amber-600/30 disabled:opacity-40 text-amber-300 border border-amber-600/40 text-xs font-semibold transition-colors cursor-pointer disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
             >
-              Apply Delay ({delayMs}ms)
+              {isSubmitting ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Sliders className="w-3.5 h-3.5" />
+              )}
+              Apply Delay ({delayMs.toLocaleString()}ms • {(delayMs / 1000).toFixed(2)}s)
             </button>
           </div>
         </div>
