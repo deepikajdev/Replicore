@@ -536,7 +536,7 @@ All endpoints are documented interactively at **http://localhost:8000/docs**.
 .\.venv\Scripts\pytest.exe -v
 ```
 
-**Current result: 51 tests, 51 passed.**
+**Current result: 68 tests, 68 passed.**
 
 ### Test Files
 
@@ -545,62 +545,88 @@ All endpoints are documented interactively at **http://localhost:8000/docs**.
 | `test_cluster_topology.py` | 5 | Health endpoint, cluster status, replica write rejection, honest error on offline node, WAL monotonic LSN |
 | `test_replication_delay.py` | 8 | Write reaches primary immediately, stale replica reads, eventual catchup, LSN monotonicity, offline replica does not block primary |
 | `test_heartbeat_watchdog.py` | 7 | Healthy heartbeat, single miss does not mark DOWN, threshold transition, counter reset on success, audit events |
-| `test_failover_epoch_fencing.py` | 16 | Automatic failover trigger, highest-LSN candidate selection, tie-breaking, filtered candidates, no-candidate scenario, manual promotion, epoch increment, fencing, write rejection on fenced node, recovered old primary stays replica, replication from new primary, API endpoints |
+| `test_failover_epoch_fencing.py` | 20 | Automatic failover trigger, highest-LSN candidate selection, tie-breaking, filtered candidates, no-candidate scenario, manual promotion, epoch increment, cascading failovers, fencing, query & body write rejection on fenced node, recovered old primary stays replica, replication from new primary, API endpoints |
 | `test_stage5_edge_cases_and_hardening.py` | 15 | Watchdog miss counter edge cases, full failover path, candidate filtering (fenced/down), epoch invariants across bad inputs, split-brain fencing after recovery, replication delay boundary, LSN-based promotion ordering, one-replica-pre-failed failover, concurrent failover lock, duplicate trigger no-op, comprehensive API error responses |
+| `test_write_read_edge_cases.py` | 13 | Write empty key/missing payload validation, null values, max key length, upsert version/LSN advancement, missing record reads, role-aware stale indicators |
 
 ---
 
 ## Demo Workflow
 
-A built-in **Demo Workflow Guide** is available in the Simulation page of the dashboard. The steps below mirror it:
+> A dedicated, runnable step-by-step walkthrough is available in [**docs/DEMO_GUIDE.md**](docs/DEMO_GUIDE.md).
+
+A built-in **Demo Workflow Guide** is also available directly in the Simulation page of the dashboard. The steps below mirror it using both UI and CLI commands:
 
 ### Step 1 — Start the Cluster
 Start backend and frontend as described in [How to Run](#how-to-run). Open the dashboard at `http://localhost:5173`. Confirm all three nodes show HEALTHY in the Overview page.
+```powershell
+curl http://localhost:8000/api/cluster/status
+```
 
 ### Step 2 — Write Data
-In the **Simulation** page → **Write & Read Test** panel:
+In the **Simulation** page → **Write & Read Test** panel (or via curl):
 - Enter a key (e.g. `user:demo`) and a value (e.g. `hello-world`)
-- Click **Write to Primary**
-- Confirm the response shows `lsn: 1` (or the current sequence number)
+- Click **Commit Write Transaction**
+```powershell
+curl -X POST http://localhost:8000/api/data/write `
+  -H "Content-Type: application/json" `
+  -d '{"key": "user:demo", "value": "hello-world"}'
+```
+- Confirm response shows `lsn: 1` and `node_id: "primary"`.
 
 ### Step 3 — Read from Primary
-- Read from `primary` — value is immediately visible
+- Read from `primary` — value is immediately visible with `is_stale_possible: false`:
+```powershell
+curl "http://localhost:8000/api/data/read?node=primary&key=user:demo"
+```
 
 ### Step 4 — Read from replica-2 (observe staleness)
-- Read from `replica-2` immediately after writing
-- Response will show `null` or the old value — **this is correct behavior**
-- `replica-2` has a 2000 ms replication delay and has not yet applied the WAL record
+- Read from `replica-2` immediately after writing:
+```powershell
+curl "http://localhost:8000/api/data/read?node=replica-2&key=user:demo"
+```
+- Response returns `data: null` with `is_stale_possible: true` — **this is expected behavior in asynchronous replication**. `replica-2` has a 2000 ms replication delay and has not yet applied the WAL record.
 
 ### Step 5 — Watch Replication Catch Up
-- Switch to the **Replication** page
-- Observe `replica-2 lag` decreasing on the lag charts
-- After ~2 seconds, read from `replica-2` again — the value is now visible
+- Switch to the **Replication** page or query:
+```powershell
+curl http://localhost:8000/api/cluster/replication
+```
+- Observe `replica-2 lag` decreasing on the lag charts.
+- After ~2 seconds, read from `replica-2` again — the value is now visible (`data.version: 1`, `data.lsn: 1`).
 
 ### Step 6 — Fail the Primary
-- In the **Simulation** page → **Node Control** panel
-- Click **Fail Node** on `primary`
-- Watch the **Cluster Overview** page: primary transitions to DOWN after 3 watchdog cycles (~6 seconds)
+- In the **Simulation** page → **Node Outage** panel: Click **Simulate Outage** on `primary` (or via curl):
+```powershell
+curl -X POST http://localhost:8000/api/simulation/node/fail `
+  -H "Content-Type: application/json" `
+  -d '{"node_id": "primary"}'
+```
+- Watch the **Cluster Overview** page: primary transitions to DOWN after 3 watchdog cycles (~6 seconds).
 
-### Step 7 — Observe Automatic Failover
-- A replica is automatically promoted to PRIMARY
-- The epoch counter in the top navigation bar increments
-- The old primary shows as FENCED in the topology view
-- `FailoverEventTimeline` and `EventLogsPage` record the sequence
+### Step 7 — Observe Automatic Failover & Promotion
+- The replica with highest applied LSN is automatically promoted to PRIMARY (`replica-1`).
+- The cluster consensus epoch increments to Epoch 2.
+- The previous primary shows as FENCED in the topology view.
+- Audit events record the entire election sequence: `PRIMARY_FAILED` → `REPLICA_SELECTED` → `EPOCH_INCREMENTED` → `NODE_PROMOTED`.
 
-### Step 8 — Attempt Write to Fenced Node
-- Use Swagger UI at `http://localhost:8000/docs`
-- `POST /api/data/write` with `target_node=primary`
-- Response: `HTTP 409 Conflict` — `FencedLeaderError`
+### Step 8 — Attempt Write to Fenced Node (Split-Brain Prevention)
+- Force a write directly to the fenced former primary:
+```powershell
+curl -i -X POST "http://localhost:8000/api/data/write?target_node=primary" `
+  -H "Content-Type: application/json" `
+  -d '{"key": "hack:1", "value": "split_brain_write"}'
+```
+- Response: `HTTP 409 Conflict` — `FencedLeaderError`. Split-brain write safely prevented!
 
 ### Step 9 — Write Through New Primary
-- In the Simulation page, write new data — it goes to the new primary
-- Replicas continue to receive WAL records from the new leader
+- In the Simulation page, write new data — it routes to the active leader (`replica-1`).
+- Remaining replicas continue to receive WAL records from the new leader.
 
 ### Step 10 — Recover Old Primary
-- Click **Recover Node** on the old primary
-- Watchdog detects health on next ping cycle
-- Node transitions back to HEALTHY as a REPLICA
-- It begins catching up WAL records from the new primary
+- Click **Recover Node** on the old primary (or `POST /api/simulation/node/recover` with `{"node_id": "primary"}`).
+- Watchdog verifies connectivity on next ping.
+- The recovered node rejoins safely as a follower `REPLICA` and begins catching up without reclaiming leadership.
 
 ---
 
@@ -671,4 +697,4 @@ The project is deliberately honest about what it simulates versus what productio
 
 ---
 
-*Replicore v0.1.0 — 51 backend tests passing — [github.com/deepikajdev/Replicore](https://github.com/deepikajdev/Replicore)*
+*Replicore v0.1.0 — 68 backend tests passing — [github.com/deepikajdev/Replicore](https://github.com/deepikajdev/Replicore)*
