@@ -450,3 +450,111 @@ def test_failover_lock_rejects_concurrent_promotions(fresh_cluster):
             fresh_cluster.promote_replica("replica-1")
     finally:
         fresh_cluster._failover_in_progress = False
+
+def test_fenced_old_primary_rejected_via_query_param_and_body_http_409(client):
+    """
+    Verify HTTP 409 Conflict is returned when attempting to write to a fenced former primary
+    via both the JSON request body (target_node_id) and query parameter (?target_node=...).
+    """
+    # 1. Promote replica-1 to advance epoch to 2 and fence 'primary'
+    promote_res = client.post("/api/cluster/failover", json={"target_node_id": "replica-1"})
+    assert promote_res.status_code == 200
+    assert promote_res.json()["new_epoch"] == 2
+
+    # 2. Attempt write with target_node_id in JSON body -> HTTP 409
+    body_res = client.post(
+        "/api/data/write",
+        json={"key": "fenced:body", "value": "payload1", "target_node_id": "primary"}
+    )
+    assert body_res.status_code == 409
+    assert "has been fenced" in body_res.json()["detail"]
+    assert "epoch 1" in body_res.json()["detail"]
+
+    # 3. Attempt write with target_node in query parameter -> HTTP 409
+    query_res = client.post(
+        "/api/data/write?target_node=primary",
+        json={"key": "fenced:query", "value": "payload2"}
+    )
+    assert query_res.status_code == 409
+    assert "has been fenced" in query_res.json()["detail"]
+
+    # 4. Valid write without target_node routes to promoted leader replica-1 -> HTTP 201
+    leader_res = client.post(
+        "/api/data/write",
+        json={"key": "active:leader", "value": "payload3"}
+    )
+    assert leader_res.status_code == 201
+    assert leader_res.json()["node_id"] == "replica-1"
+
+def test_cascading_failover_fences_all_former_primaries(client):
+    """
+    Verify epoch advancement and fencing across cascading failovers:
+    1. primary (epoch 1) -> replica-1 promoted (epoch 2), primary fenced.
+    2. replica-1 fails -> replica-2 promoted (epoch 3), replica-1 fenced.
+    3. Both primary and replica-1 reject writes with HTTP 409.
+    4. replica-2 accepts writes at epoch 3.
+    """
+    # First failover: primary -> replica-1
+    res1 = client.post("/api/cluster/failover", json={"target_node_id": "replica-1"})
+    assert res1.status_code == 200
+    assert res1.json()["new_epoch"] == 2
+
+    # Second failover: replica-1 -> replica-2
+    res2 = client.post("/api/cluster/failover", json={"target_node_id": "replica-2"})
+    assert res2.status_code == 200
+    assert res2.json()["new_epoch"] == 3
+    assert res2.json()["previous_primary_id"] == "replica-1"
+
+    # Both former leaders must reject direct writes with HTTP 409
+    write_p1 = client.post(
+        "/api/data/write",
+        json={"key": "k1", "value": "v1", "target_node_id": "primary"}
+    )
+    assert write_p1.status_code == 409
+
+    write_p2 = client.post(
+        "/api/data/write",
+        json={"key": "k2", "value": "v2", "target_node_id": "replica-1"}
+    )
+    assert write_p2.status_code == 409
+
+    # New leader accepts write
+    write_p3 = client.post(
+        "/api/data/write",
+        json={"key": "k3", "value": "v3"}
+    )
+    assert write_p3.status_code == 201
+    assert write_p3.json()["node_id"] == "replica-2"
+
+def test_cannot_promote_fenced_node_via_api(client):
+    """
+    Attempting to promote a node that has already been fenced must return HTTP 400.
+    """
+    # Promote replica-1, fencing 'primary'
+    client.post("/api/cluster/failover", json={"target_node_id": "replica-1"})
+
+    # Attempt to promote fenced 'primary'
+    promote_fenced = client.post("/api/cluster/failover", json={"target_node_id": "primary"})
+    assert promote_fenced.status_code == 400
+    assert "fenced" in promote_fenced.json()["detail"].lower()
+
+def test_recovered_former_primary_still_returns_409_after_connectivity_restored(client):
+    """
+    Simulating node recovery restores network reachability, but the node remains fenced
+    and continues to reject writes with HTTP 409.
+    """
+    # 1. Promote replica-1
+    client.post("/api/cluster/failover", json={"target_node_id": "replica-1"})
+
+    # 2. Recover 'primary'
+    rec_res = client.post("/api/simulation/node/recover", json={"node_id": "primary"})
+    assert rec_res.status_code == 200
+
+    # 3. Old primary is online, but write is STILL rejected with HTTP 409
+    fenced_res = client.post(
+        "/api/data/write",
+        json={"key": "split:test", "value": "rogue", "target_node_id": "primary"}
+    )
+    assert fenced_res.status_code == 409
+    assert "has been fenced" in fenced_res.json()["detail"]
+
