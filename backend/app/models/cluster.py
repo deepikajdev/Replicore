@@ -84,6 +84,8 @@ class ReplicaLagInfo(BaseModel):
     lag_lsn: int
     configured_delay_ms: int
     pending_queue_count: int
+    sync_percentage: float = 100.0
+    is_caught_up: bool = True
 
 class ReplicationStatusResponse(BaseModel):
     primary_node_id: Optional[str] = None

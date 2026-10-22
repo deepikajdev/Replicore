@@ -112,46 +112,81 @@ export const ReplicationPage: React.FC = () => {
                 <tr className="border-b border-[#30363d] text-[#7d8590] uppercase tracking-wider bg-[#0d1117]/40">
                   <th scope="col" className="py-2.5 px-3 font-medium">Replica</th>
                   <th scope="col" className="py-2.5 px-3 font-medium">Status</th>
+                  <th scope="col" className="py-2.5 px-3 font-medium">Replication Progress</th>
                   <th scope="col" className="py-2.5 px-3 font-medium">Primary LSN</th>
                   <th scope="col" className="py-2.5 px-3 font-medium">Applied LSN</th>
-                  <th scope="col" className="py-2.5 px-3 font-medium">Lag (LSN)</th>
+                  <th scope="col" className="py-2.5 px-3 font-medium">Sync State</th>
                   <th scope="col" className="py-2.5 px-3 font-medium">Configured Delay</th>
                   <th scope="col" className="py-2.5 px-3 font-medium">Pending Queue</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#21262d]">
-                {replicas.map((replica) => (
-                  <tr key={replica.node_id} className="hover:bg-[#1c2128]/50 transition-colors">
-                    <td className="py-3 px-3 font-medium text-[#e6edf3]">
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono font-semibold">{replica.node_id}</span>
-                        <span className="text-[#7d8590] font-normal">({replica.name})</span>
-                      </div>
-                    </td>
-                    <td className="py-3 px-3">
-                      <StatusBadge status={replica.status} />
-                    </td>
-                    <td className="py-3 px-3 font-mono text-[#7d8590]">{primaryLsn}</td>
-                    <td className="py-3 px-3 font-mono font-semibold text-[#e6edf3]">
-                      {replica.applied_lsn}
-                    </td>
-                    <td className="py-3 px-3">
-                      <span
-                        className={`font-mono font-semibold ${
-                          replica.lag_lsn > 0 ? 'text-amber-400' : 'text-emerald-400'
-                        }`}
-                      >
-                        {replica.lag_lsn === 0 ? '0 (In Sync)' : `${replica.lag_lsn} records`}
-                      </span>
-                    </td>
-                    <td className="py-3 px-3 font-mono text-[#7d8590]">
-                      {replica.configured_delay_ms} ms
-                    </td>
-                    <td className="py-3 px-3 font-mono text-[#7d8590]">
-                      {replica.pending_queue_count}
-                    </td>
-                  </tr>
-                ))}
+                {replicas.map((replica) => {
+                  const syncPct = replica.sync_percentage ?? (primaryLsn === 0 ? 100 : Math.min(100, Math.round((replica.applied_lsn / primaryLsn) * 100)))
+                  const isDown = replica.status === 'DOWN' || replica.status === 'ISOLATED'
+
+                  return (
+                    <tr key={replica.node_id} className="hover:bg-[#1c2128]/50 transition-colors">
+                      <td className="py-3 px-3 font-medium text-[#e6edf3]">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-semibold">{replica.node_id}</span>
+                          <span className="text-[#7d8590] font-normal">({replica.name})</span>
+                        </div>
+                      </td>
+                      <td className="py-3 px-3">
+                        <StatusBadge status={replica.status} />
+                      </td>
+                      <td className="py-3 px-3 min-w-[150px]">
+                        <div className="flex items-center justify-between text-[11px] mb-1">
+                          <span className="font-mono font-semibold text-[#e6edf3]">{syncPct}%</span>
+                          <span className="font-mono text-[#7d8590] text-[10px]">
+                            {replica.applied_lsn} / {primaryLsn}
+                          </span>
+                        </div>
+                        <div className="w-full bg-[#21262d] rounded-full h-1.5 overflow-hidden">
+                          <div
+                            className={`h-full transition-all duration-300 rounded-full ${
+                              isDown
+                                ? 'bg-rose-600'
+                                : replica.lag_lsn === 0
+                                ? 'bg-emerald-500'
+                                : 'bg-amber-500'
+                            }`}
+                            style={{ width: `${isDown ? 100 : syncPct}%` }}
+                          />
+                        </div>
+                        {isDown && (
+                          <span className="text-[10px] text-rose-400 font-medium block mt-0.5">Stream severed (offline)</span>
+                        )}
+                      </td>
+                      <td className="py-3 px-3 font-mono text-[#7d8590]">{primaryLsn}</td>
+                      <td className="py-3 px-3 font-mono font-semibold text-[#e6edf3]">
+                        {replica.applied_lsn}
+                      </td>
+                      <td className="py-3 px-3">
+                        {isDown ? (
+                          <span className="inline-flex items-center font-mono text-[11px] text-rose-400 bg-rose-950/40 px-2 py-0.5 rounded border border-rose-800/50">
+                            Disconnected
+                          </span>
+                        ) : replica.lag_lsn === 0 ? (
+                          <span className="inline-flex items-center font-mono font-semibold text-emerald-400 bg-emerald-950/30 px-2 py-0.5 rounded border border-emerald-800/40 text-[11px]">
+                            ✓ Caught Up
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center font-mono font-semibold text-amber-400 bg-amber-950/30 px-2 py-0.5 rounded border border-amber-800/40 text-[11px]">
+                            -{replica.lag_lsn} LSN
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-3 px-3 font-mono text-[#7d8590]">
+                        {replica.configured_delay_ms} ms
+                      </td>
+                      <td className="py-3 px-3 font-mono text-[#7d8590]">
+                        {replica.pending_queue_count}
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>

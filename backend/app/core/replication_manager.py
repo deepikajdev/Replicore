@@ -154,6 +154,9 @@ class ReplicationManager:
         for n in self.nodes.values():
             if n.role == NodeRole.REPLICA:
                 lag = max(0, primary_lsn - n.last_applied_lsn)
+                sync_pct = 100.0 if primary_lsn == 0 else round(min(100.0, max(0.0, (n.last_applied_lsn / primary_lsn) * 100.0)), 1)
+                pending_cnt = len(self._queues.get(n.node_id, []))
+                is_caught_up = (lag == 0 and pending_cnt == 0 and n.status == NodeStatus.HEALTHY)
                 replicas_info.append(
                     ReplicaLagInfo(
                         node_id=n.node_id,
@@ -163,7 +166,9 @@ class ReplicationManager:
                         applied_lsn=n.last_applied_lsn,
                         lag_lsn=lag,
                         configured_delay_ms=n.replication_delay_ms,
-                        pending_queue_count=len(self._queues.get(n.node_id, []))
+                        pending_queue_count=pending_cnt,
+                        sync_percentage=sync_pct,
+                        is_caught_up=is_caught_up
                     )
                 )
 

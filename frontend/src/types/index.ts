@@ -75,6 +75,8 @@ export interface ReplicaLagInfo {
   lag_lsn: number
   configured_delay_ms: number
   pending_queue_count: number
+  sync_percentage?: number
+  is_caught_up?: boolean
 }
 
 export interface ReplicationStatus {
