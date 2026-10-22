@@ -13,6 +13,7 @@ from backend.app.models.cluster import (
     NodeSimulationRequest,
     ManualFailoverRequest,
     PromotionResult,
+    NodeRole,
 )
 from backend.app.models.data_record import RecordWriteRequest, RecordResponse
 
@@ -171,11 +172,13 @@ def read_data(
     """
     try:
         data = cluster.execute_read(node_id=node, key=key)
+        target_node = cluster.get_node(node) if node else cluster.get_primary()
+        is_stale = target_node is not None and target_node.role != NodeRole.PRIMARY
         return {
             "requested_node": node or "auto-routed",
             "key": key,
             "data": data,
-            "is_stale_possible": node is not None and node != "primary"
+            "is_stale_possible": is_stale
         }
     except KeyError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
