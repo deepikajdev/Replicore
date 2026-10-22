@@ -9,6 +9,7 @@ import {
   AlertTriangle,
   Server,
   WifiOff,
+  RefreshCw,
 } from 'lucide-react'
 import {
   ResponsiveContainer,
@@ -32,7 +33,7 @@ interface OverviewPageProps {
 }
 
 export const OverviewPage: React.FC<OverviewPageProps> = ({ onNavigate }) => {
-  const { cluster, replication, events, isBackendConnected, isLoading } = useCluster()
+  const { cluster, replication, events, isBackendConnected, isLoading, error, refreshAll } = useCluster()
 
   const nodes = cluster?.nodes ?? []
   const replicaNodes = nodes.filter((n) => n.role === 'REPLICA')
@@ -101,6 +102,33 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({ onNavigate }) => {
           </div>
         }
       />
+
+      {/* Backend Disconnected Feedback Banner */}
+      {!isBackendConnected && !isLoading && (
+        <div
+          role="alert"
+          className="rounded-lg border border-rose-900/60 bg-rose-950/30 p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-xs text-rose-200"
+        >
+          <div className="flex items-center gap-3">
+            <WifiOff className="w-5 h-5 text-rose-400 shrink-0" aria-hidden="true" />
+            <div>
+              <p className="font-semibold text-rose-100">Backend API Disconnected</p>
+              <p className="text-[#c9d1d9] text-[11px] mt-0.5">
+                {error?.message
+                  ? `Connection error: ${error.message}`
+                  : 'Cannot reach Replicore simulator server at http://localhost:8000.'} Ensure FastAPI backend is active.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => refreshAll()}
+            className="px-3 py-1.5 rounded bg-rose-600/20 hover:bg-rose-600/30 border border-rose-600/40 text-rose-200 text-xs font-medium transition-colors flex items-center justify-center gap-1.5 shrink-0 cursor-pointer"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            Retry Connection
+          </button>
+        </div>
+      )}
 
       {/* 2. Primary KPI Stats Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

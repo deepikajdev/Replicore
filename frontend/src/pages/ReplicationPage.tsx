@@ -1,5 +1,5 @@
 import React from 'react'
-import { RefreshCw, GitCommit, Layers, Inbox } from 'lucide-react'
+import { RefreshCw, GitCommit, Layers, Inbox, WifiOff } from 'lucide-react'
 import { SectionHeader } from '../components/SectionHeader'
 import { StatCard } from '../components/StatCard'
 import { StatusBadge } from '../components/StatusBadge'
@@ -9,7 +9,7 @@ import { ReplicaLagBarChart } from '../components/ReplicaLagBarChart'
 import { useCluster } from '../hooks/useCluster'
 
 export const ReplicationPage: React.FC = () => {
-  const { replication, cluster, metricsHistory, isLoading } = useCluster()
+  const { replication, cluster, metricsHistory, isLoading, isBackendConnected, refreshAll } = useCluster()
 
   const replicas = replication?.replicas ?? []
   const primaryLsn = replication?.primary_lsn ?? cluster?.current_primary_lsn ?? 0
@@ -96,14 +96,32 @@ export const ReplicationPage: React.FC = () => {
           </div>
         </div>
 
-        {replicas.length === 0 ? (
+        {!isBackendConnected && !isLoading ? (
           <div className="py-12 text-center text-[#7d8590]">
-            <Inbox className="w-8 h-8 mx-auto mb-2 opacity-40" />
-            <p className="text-sm">
-              {isLoading
-                ? 'Fetching replication stream...'
-                : 'No follower replicas currently registered in the replication stream.'}
-            </p>
+            <WifiOff className="w-8 h-8 mx-auto mb-2 text-rose-400 opacity-80" />
+            <p className="text-sm font-semibold text-[#e6edf3]">Replication Service Offline</p>
+            <p className="text-xs text-[#7d8590] mt-1 mb-3">Backend telemetry endpoint is unreachable.</p>
+            <button
+              onClick={() => refreshAll()}
+              className="px-3 py-1.5 rounded bg-rose-600/20 hover:bg-rose-600/30 border border-rose-600/40 text-rose-200 text-xs font-medium transition-colors inline-flex items-center gap-1.5 cursor-pointer"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              Retry Connection
+            </button>
+          </div>
+        ) : replicas.length === 0 ? (
+          <div className="py-12 text-center text-[#7d8590]">
+            {isLoading ? (
+              <>
+                <RefreshCw className="w-7 h-7 mx-auto mb-2 text-blue-400 animate-spin" />
+                <p className="text-sm font-semibold text-[#e6edf3]">Fetching replication stream...</p>
+              </>
+            ) : (
+              <>
+                <Inbox className="w-8 h-8 mx-auto mb-2 opacity-40" />
+                <p className="text-sm">No follower replicas currently registered in the replication stream.</p>
+              </>
+            )}
           </div>
         ) : (
           <div className="overflow-x-auto">

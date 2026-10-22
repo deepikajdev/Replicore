@@ -1,12 +1,12 @@
 import React from 'react'
-import { Server, ShieldCheck, Heart, Inbox, Activity, Terminal, ShieldAlert } from 'lucide-react'
+import { Server, ShieldCheck, Heart, Inbox, Activity, Terminal, ShieldAlert, WifiOff, RefreshCw } from 'lucide-react'
 import { SectionHeader } from '../components/SectionHeader'
 import { StatusBadge } from '../components/StatusBadge'
 import { StatCard } from '../components/StatCard'
 import { useCluster } from '../hooks/useCluster'
 
 export const ClusterNodesPage: React.FC = () => {
-  const { cluster, isLoading } = useCluster()
+  const { cluster, isLoading, isBackendConnected, refreshAll } = useCluster()
 
   const nodes = cluster?.nodes ?? []
   const primariesCount = nodes.filter((n) => n.role === 'PRIMARY').length
@@ -59,17 +59,46 @@ export const ClusterNodesPage: React.FC = () => {
         />
       </div>
 
-      {nodes.length === 0 ? (
-        <div className="rounded-lg border border-[#30363d] bg-[#161b22] p-12 text-center text-[#7d8590]">
-          <Inbox className="w-10 h-10 mx-auto mb-3 opacity-40" />
+      {!isBackendConnected && !isLoading ? (
+        <div className="rounded-lg border border-rose-900/60 bg-[#161b22] p-10 text-center text-[#7d8590]">
+          <WifiOff className="w-10 h-10 mx-auto mb-3 text-rose-400 opacity-80" />
           <h2 className="text-sm font-semibold text-[#e6edf3] mb-1">
-            {isLoading ? 'Fetching cluster topology...' : 'No Nodes Detected'}
+            Backend Service Offline
           </h2>
-          <p className="text-xs">
-            {isLoading
-              ? 'Connecting to cluster watchdog...'
-              : 'The cluster backend did not return any registered nodes.'}
+          <p className="text-xs text-[#c9d1d9] max-w-md mx-auto mb-4">
+            Unable to fetch node topology. Ensure the Replicore FastAPI server is running at http://localhost:8000.
           </p>
+          <button
+            onClick={() => refreshAll()}
+            className="px-4 py-1.5 rounded bg-rose-600/20 hover:bg-rose-600/30 border border-rose-600/40 text-rose-200 text-xs font-medium transition-colors inline-flex items-center gap-1.5 cursor-pointer"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            Retry Connection
+          </button>
+        </div>
+      ) : nodes.length === 0 ? (
+        <div className="rounded-lg border border-[#30363d] bg-[#161b22] p-12 text-center text-[#7d8590]">
+          {isLoading ? (
+            <>
+              <RefreshCw className="w-8 h-8 mx-auto mb-3 text-blue-400 animate-spin" />
+              <h2 className="text-sm font-semibold text-[#e6edf3] mb-1">
+                Fetching Cluster Topology...
+              </h2>
+              <p className="text-xs text-[#7d8590]">
+                Querying node heartbeat and state tables...
+              </p>
+            </>
+          ) : (
+            <>
+              <Inbox className="w-10 h-10 mx-auto mb-3 opacity-40" />
+              <h2 className="text-sm font-semibold text-[#e6edf3] mb-1">
+                No Registered Nodes
+              </h2>
+              <p className="text-xs text-[#7d8590]">
+                The cluster backend is online but reports no active database nodes.
+              </p>
+            </>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4">
