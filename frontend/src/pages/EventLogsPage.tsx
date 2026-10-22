@@ -4,6 +4,20 @@ import { SectionHeader } from '../components/SectionHeader'
 import { useCluster } from '../hooks/useCluster'
 import type { AuditEventType } from '../types'
 
+const formatEventTime = (isoString?: string): { relative: string; full: string } => {
+  if (!isoString) return { relative: '—', full: '—' }
+  const date = new Date(isoString)
+  if (isNaN(date.getTime())) return { relative: '—', full: '—' }
+  const now = Date.now()
+  const diffSec = Math.max(0, Math.floor((now - date.getTime()) / 1000))
+  let relative = ''
+  if (diffSec < 5) relative = 'Just now'
+  else if (diffSec < 60) relative = `${diffSec}s ago`
+  else if (diffSec < 3600) relative = `${Math.floor(diffSec / 60)}m ago`
+  else relative = `${Math.floor(diffSec / 3600)}h ago`
+  return { relative, full: date.toLocaleTimeString() }
+}
+
 export const EventLogsPage: React.FC = () => {
   const { events, totalEvents, isLoading } = useCluster()
   const [filterType, setFilterType] = useState<string>('ALL')
@@ -153,29 +167,47 @@ export const EventLogsPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#21262d]">
-                {filteredEvents.map((event) => (
-                  <tr key={event.id} className="hover:bg-[#1c2128]/50 transition-colors">
-                    <td className="py-3 px-4 font-mono text-[#7d8590] whitespace-nowrap">
-                      {event.timestamp ? new Date(event.timestamp).toLocaleTimeString() : '—'}
-                    </td>
-                    <td className="py-3 px-4 whitespace-nowrap">
-                      <span className={`px-2 py-0.5 rounded font-mono text-[11px] font-semibold border ${getBadgeStyle(event.event_type)}`}>
-                        {event.event_type}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 font-mono font-medium text-[#e6edf3]">
-                      {event.source_node || 'SYSTEM'}
-                    </td>
-                    <td className="py-3 px-4 text-[#e6edf3]">
-                      {event.description}
-                    </td>
-                    <td className="py-3 px-4 font-mono text-[11px] text-[#7d8590] max-w-xs truncate" title={JSON.stringify(event.details, null, 2)}>
-                      {event.details && Object.keys(event.details).length > 0
-                        ? JSON.stringify(event.details)
-                        : '—'}
-                    </td>
-                  </tr>
-                ))}
+                {filteredEvents.map((event) => {
+                  const { relative, full } = formatEventTime(event.timestamp)
+                  return (
+                    <tr key={event.id} className="hover:bg-[#1c2128]/50 transition-colors">
+                      <td className="py-3 px-4 font-mono whitespace-nowrap">
+                        <div className="text-[#e6edf3] text-xs font-medium">{relative}</div>
+                        <div className="text-[10px] text-[#7d8590]">{full}</div>
+                      </td>
+                      <td className="py-3 px-4 whitespace-nowrap">
+                        <span className={`px-2 py-0.5 rounded font-mono text-[11px] font-semibold border ${getBadgeStyle(event.event_type)}`}>
+                          {event.event_type}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 font-mono font-medium text-[#e6edf3]">
+                        <span className="px-1.5 py-0.5 rounded bg-[#0d1117] border border-[#30363d] text-[11px]">
+                          {event.source_node || 'SYSTEM'}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-[#e6edf3] leading-relaxed">
+                        {event.description}
+                      </td>
+                      <td className="py-3 px-4">
+                        {event.details && Object.keys(event.details).length > 0 ? (
+                          <div className="flex flex-wrap gap-1 max-w-sm">
+                            {Object.entries(event.details).map(([k, v]) => (
+                              <span
+                                key={k}
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-mono bg-[#0d1117] text-[#7d8590] rounded border border-[#21262d]"
+                              >
+                                <span className="text-[#484f58]">{k}:</span>
+                                <span className="text-[#c9d1d9] font-medium">{String(v)}</span>
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-[#484f58] font-mono text-[11px]">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
